@@ -66,7 +66,9 @@ discovery. Setup creates no hooks and changes no agent approval settings. It upd
 only Paddock-managed skill files, refuses conflicting unmanaged files or symlinks, and
 removal preserves other files in the skill directory.
 
-The guide covers delegation, PR watch registration, author policy, and queued replies.
+The guide makes watch registration part of creating a PR for a Paddock task, using
+the approved author list, and asks agents to report watch and poller readiness when
+handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. A credentialed `paddock github poll --interval 30s` process still handles watched
 PRs and publishes agent replies. Agents reuse the configured workflow rather than
