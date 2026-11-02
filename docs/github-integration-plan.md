@@ -1,6 +1,9 @@
-# GitHub coordination implementation plan
+# GitHub coordination implementation plan (historical)
 
-The current CLI has a file store with OS locking and atomic replacement, task-owned
+This records the original coordination scope, completed in PR #1. App authentication
+and repository routing have since been replaced; see [current setup](github.md).
+
+At that starting point, the CLI has a file store with OS locking and atomic replacement, task-owned
 worktrees, agent launch/exit tracking, and delegation. It has no planner, inbound
 message delivery, PR ownership mapping, or event journal. Those are the missing pieces.
 

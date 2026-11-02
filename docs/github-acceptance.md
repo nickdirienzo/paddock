@@ -1,5 +1,8 @@
 # GitHub coordination acceptance evidence
 
+This is the historical PR #1 checkpoint. See [App acceptance](github-app-acceptance.md)
+for the subsequent native authentication and routing checks.
+
 Verified on 2026-11-02 against the installed Codex CLI and a real GitHub PR.
 
 ## Live review round trip

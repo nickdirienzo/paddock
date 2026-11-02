@@ -28,7 +28,7 @@ paddock show <task-id>
 paddock attach <task-id>
 ```
 
-The directory must have an existing Git commit. No repository registration is needed. Default agent: `codex`. Default terminal: use a reachable local Rex server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to choose explicitly. An explicit backend failure never silently launches another session elsewhere.
+The directory must have an existing Git commit. No repository registration is needed. Default agent: `codex`. Default terminal: use a reachable local Rex server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to choose explicitly. An explicit backend failure never silently launches another session elsewhere. Ordinary `paddock run` also selects the new session in the connected Rex app when Remote Control is enabled. Use `--detach` to leave it in the background. JSON output, delegation, and runs invoked from an existing Paddock agent stay in the background; Screen continues to launch detached.
 
 Bare repositories are supported too. Point at the bare repository itself; Paddock creates a separate task worktree from it:
 
@@ -132,7 +132,9 @@ rex client ls --json
 paddock attach <id> --client <client-id>
 ```
 
-The selected app must allow **Remote Control** in **Settings → Rex Server**. When disabled, Paddock reports the rejection and the session ID; you can open that session manually. Creating sessions and inspecting processes do not require this app setting. If no app is connected, open Rex before attaching.
+`paddock run --client <id> "prompt"` targets a particular app for automatic display; `REX_CLIENT` also applies. Without either, Paddock selects the sole connected app.
+
+The selected app must allow **Remote Control** in **Settings → Rex Server**. When disabled, Paddock reports the rejection and an attach command; the created task continues independently. A display failure does not turn a successful launch into a failed command. Creating sessions and inspecting processes do not require this app setting. If no app is connected, open Rex before attaching.
 
 Paddock looks for `rex` on PATH, then the standard Rex/Rex Beta app-bundle locations on macOS. Set `PADDOCK_REX_BIN` for another location. This adapter uses Rex's CLI, not its private sockets directly. See the [Rex documentation](https://www.superlogical.com/rex/docs) and `rex __internal skill` for the installed version's contract.
 
@@ -148,9 +150,10 @@ Screen sessions run detached from the launching CLI. Detach with **Ctrl-A, then 
 ## GitHub coordination
 
 Use PR conversations and review comments to message a task agent, delegate work, and
-post replies through a developer or team GitHub App identity. See the [setup and
-operating guide](docs/github.md) for explicit watches, authorization, polling, and
-restart behavior.
+post replies through a developer or team GitHub App identity. Named profiles map
+repositories or owners to personal/team Apps, with automatic installation-token refresh
+and protected local key storage. See the [setup and operating guide](docs/github.md)
+for authentication, routing, explicit watches, and restart behavior.
 
 ## Files and durability
 

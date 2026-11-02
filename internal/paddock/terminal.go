@@ -52,6 +52,7 @@ func output(ctx context.Context, path string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	c := exec.CommandContext(ctx, path, args...)
+	c.Env = credentialFreeEnvironment(os.Environ())
 	var stderr bytes.Buffer
 	c.Stderr = &stderr
 	b, err := c.Output()
@@ -270,6 +271,7 @@ func (t terminal) Attach(ctx context.Context, task Task, client string) error {
 	}
 	if t.backend == "screen" {
 		c := exec.CommandContext(ctx, t.path, "-x", s.ID)
+		c.Env = credentialFreeEnvironment(os.Environ())
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr

@@ -15,9 +15,9 @@ import (
 )
 
 type GitHubIdentity struct {
-	Mode     string `json:"mode"`
-	Login    string `json:"login"`
-	TokenEnv string `json:"token_env,omitempty"`
+	Mode  string           `json:"mode"`
+	Login string           `json:"login"`
+	App   *GitHubAppConfig `json:"app,omitempty"`
 }
 
 type PullRequest struct {
@@ -56,7 +56,6 @@ type GitHubComment struct {
 
 var githubRepoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var githubLogin = regexp.MustCompile(`^[A-Za-z0-9_-]+(\[bot\])?$`)
-var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func ParsePullRequest(raw string) (string, int, error) {
 	u, err := url.Parse(raw)
@@ -76,11 +75,41 @@ func ParsePullRequest(raw string) (string, int, error) {
 
 // GitHubAPI owns transport identity only. It has no authority to select a task,
 // approve an author, or decide which action an agent should take.
-type GitHubAPI struct{ Identity GitHubIdentity }
+type GitHubAPI struct {
+	Identity GitHubIdentity
+	app      *githubAppAuth
+}
+
+func NewGitHubAPI(identity GitHubIdentity) GitHubAPI {
+	g := GitHubAPI{Identity: identity}
+	if identity.Mode == "app" && identity.App != nil {
+		g.app = newGitHubAppAuth(*identity.App)
+	}
+	return g
+}
+
+func (g GitHubAPI) AuthenticatedIdentity(ctx context.Context) (GitHubIdentity, error) {
+	identity := g.Identity
+	if identity.Mode == "app" {
+		if g.app == nil {
+			return identity, fmt.Errorf("configure App ID, installation ID and private key; external token mode has been replaced")
+		}
+		login, err := g.app.authenticate(ctx, identity.Login)
+		identity.Login = login
+		return identity, err
+	}
+	return identity, g.ValidateIdentity(ctx)
+}
 
 func (g GitHubAPI) request(ctx context.Context, method, path string, body, result any) error {
 	if !strings.HasPrefix(path, "repos/") && !strings.HasPrefix(path, "users/") && path != "user" && path != "installation/repositories?per_page=1" {
 		return fmt.Errorf("unsupported GitHub API path")
+	}
+	if g.Identity.Mode == "app" {
+		if g.app == nil {
+			return fmt.Errorf("configure App credentials with paddock github auth")
+		}
+		return g.app.request(ctx, method, path, body, result)
 	}
 	args := []string{"api", "--hostname", "github.com", "--method", method, "-H", "Accept: application/vnd.github+json", path}
 	var input []byte
@@ -96,23 +125,8 @@ func (g GitHubAPI) request(ctx context.Context, method, path string, body, resul
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Stdin = bytes.NewReader(input)
-	env := os.Environ()
-	if g.Identity.Mode == "app" {
-		if !environmentName.MatchString(g.Identity.TokenEnv) {
-			return fmt.Errorf("invalid installation token environment variable")
-		}
-		token := os.Getenv(g.Identity.TokenEnv)
-		if token == "" {
-			return fmt.Errorf("installation token environment variable %s is empty", g.Identity.TokenEnv)
-		}
-		var clean []string
-		for _, v := range env {
-			if !strings.HasPrefix(v, "GH_TOKEN=") && !strings.HasPrefix(v, "GITHUB_TOKEN=") {
-				clean = append(clean, v)
-			}
-		}
-		env = append(clean, "GH_TOKEN="+token)
-	} else if g.Identity.Mode != "gh" {
+	env := credentialFreeEnvironment(os.Environ())
+	if g.Identity.Mode != "gh" {
 		return fmt.Errorf("configure GitHub identity first")
 	}
 	cmd.Env = append(env, "GH_PROMPT_DISABLED=1")
@@ -127,14 +141,12 @@ func (g GitHubAPI) request(ctx context.Context, method, path string, body, resul
 }
 
 func (g GitHubAPI) ValidateIdentity(ctx context.Context) error {
+	if g.Identity.Mode == "app" {
+		_, err := g.AuthenticatedIdentity(ctx)
+		return err
+	}
 	if !githubLogin.MatchString(g.Identity.Login) {
 		return fmt.Errorf("invalid GitHub identity login")
-	}
-	if g.Identity.Mode == "app" {
-		if !strings.HasSuffix(g.Identity.Login, "[bot]") {
-			return fmt.Errorf("App identity must use the team's bot login ending in [bot]")
-		}
-		return g.request(ctx, "GET", "installation/repositories?per_page=1", nil, nil)
 	}
 	var user struct {
 		Login string `json:"login"`
