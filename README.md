@@ -128,6 +128,11 @@ Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `
 
 ### Delegation
 
+Use native subagents for bounded independent reviews and checks when available.
+Paddock delegation is for work that needs a durable task, a separate worktree/branch,
+or a reconnectable terminal session. Each child creates a separate Rex session or
+Screen terminal. Independent context alone does not require that lifecycle.
+
 ```sh
 # From your own shell:
 paddock delegate --parent <id> --agent claude "Implement the frontend"
@@ -137,6 +142,10 @@ paddock delegate --agent claude "Implement the frontend"
 ```
 
 The supervisor exports `PADDOCK_TASK_ID`, `PADDOCK_PARENT_TASK_ID`, and `PADDOCK_HOME`, and adds Paddock's executable directory to PATH. The agent prompt includes an absolute delegation command with an explicit parent ID and registry path, so delegation can also work when an agent filters environment variables. The agent's ordinary tool approvals still apply.
+
+Use `paddock message TASK_ID "instruction or result"` to communicate with an existing
+Paddock agent. Terminal typing can interfere with the user's input and is not a
+fallback for native agent messaging.
 
 Children inherit the parent's repository and terminal backend, unless overridden. Agent selection defaults to Codex and can be set explicitly. Each child starts from the repository's default branch, not uncommitted parent work. To build on committed parent work:
 

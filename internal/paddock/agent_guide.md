@@ -22,7 +22,20 @@ Run `paddock --help` and `paddock github --help` for this installed version's op
 
 ## Delegate and reconnect
 
-When independent work is within the user's authorized scope, delegate through Paddock:
+Choose the smallest execution scope that fits the work. Do ordinary implementation,
+inspection, and validation in the current task. When independent review or parallel
+help is authorized, prefer the harness's native subagents for bounded work such as a
+diff review, investigation, or test check. Independent context alone does not require
+a Paddock task, another worktree, or a visible Rex session.
+
+Use `paddock delegate` when the work needs a durable task identity, an independent
+worktree/branch, or a persistent session the user can reconnect to, or when the user
+explicitly requests it. Each delegated task creates a separate terminal session.
+If native subagents are unavailable, use a bounded fresh-context invocation when
+supported for a short independent review; do not automatically escalate every review
+into a persistent Paddock task. Preserve repository requirements for independent review.
+
+For work that does warrant a durable child task:
 
 ```sh
 paddock delegate --agent codex "Describe the independent task"
@@ -36,6 +49,12 @@ Delegation inherits the parent from `PADDOCK_TASK_ID`. Outside a task, provide
 default branch. Use `--base PARENT_BRANCH` to include committed parent work; uncommitted
 changes are not copied. Inspect the child's actual changes and validation before
 integrating them. A running session or delivery acknowledgement does not mean completion.
+
+Send instructions and results between existing Paddock tasks with `paddock message`.
+Use the native subagent messaging/result mechanism for native subagents. Do not use
+`rex send`, simulated typing, or Enter to communicate with an agent: these manipulate
+its interactive input and can collide with a user's draft. If native message delivery
+is unavailable, report that limitation instead of falling back to terminal keystrokes.
 
 Ordinary human-invoked `run` opens the new Rex session. `--detach`, `--json`, delegation,
 and runs from an existing task stay in the background. `attach` reopens the existing

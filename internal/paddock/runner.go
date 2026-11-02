@@ -18,8 +18,10 @@ func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'")
 func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	prompt := t.Prompt + "\n\nPaddock context: task " + t.ID + ". Work in this task's current Git worktree. " +
 		"Read the Paddock agent guide by running " + quote(exe) + " skill show before coordinating tasks or PR work. " +
-		"To delegate a child task, run: PADDOCK_HOME=" + quote(home) + " " + quote(exe) + " delegate --parent " + t.ID + " --agent claude \"Describe the child task\". " +
-		"Use --agent codex to delegate to Codex. Children start from the repository default branch; pass --base " + t.Branch + " to include committed parent work. Use paddock show to inspect children."
+		"Keep ordinary work in this task. When independent help is authorized, prefer native subagents for short reviews and checks. Use Paddock delegation only when a durable child task, separate worktree, or reconnectable session is needed, or the user requests it. " +
+		"For such a child, run: PADDOCK_HOME=" + quote(home) + " " + quote(exe) + " delegate --parent " + t.ID + " --agent codex \"Describe the child task\". " +
+		"Use --agent claude for Claude Code. Children start from the repository default branch; pass --base " + t.Branch + " to include committed parent work. Use paddock show to inspect children. " +
+		"Communicate with existing Paddock agents through paddock message; never use terminal typing or simulated Enter as agent messaging."
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
 	args := []string{}
 	if t.Session.Agent == "codex" && t.Session.TrustProject {
