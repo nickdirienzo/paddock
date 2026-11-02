@@ -1,0 +1,1 @@
+Disposable OpenShell sandbox and GitHub App identity acceptance test.
