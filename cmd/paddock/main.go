@@ -16,7 +16,7 @@ import (
 const help = `Paddock — a local control plane for coding agents
 
   paddock run "prompt" [--agent codex|claude] [--terminal auto|rex|screen]
-                      [--repo path] [--base ref] [--json]
+                      [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate "prompt" [--parent id] [run options]
   paddock message <id> "message"
   paddock tasks [--json]
@@ -32,6 +32,7 @@ const help = `Paddock — a local control plane for coding agents
 Delegate inherits the parent from PADDOCK_TASK_ID when --parent is omitted.
 Task IDs accept unique prefixes. State: PADDOCK_HOME or ~/.local/state/paddock.
 Rex attach selects a session in a connected Rex app. Screen attaches here.
+Run opens its Rex session automatically; --detach or --json keeps it in the background.
 --repo accepts a registered name, a working-tree path, or a bare-repository path.
 `
 
@@ -68,7 +69,7 @@ func parse(args []string, allowed string) (map[string]string, []string, error) {
 		if _, ok := opts[key]; ok {
 			return nil, nil, fmt.Errorf("duplicate option --%s", key)
 		}
-		if key == "json" || key == "queue" {
+		if key == "json" || key == "queue" || key == "detach" {
 			if has {
 				return nil, nil, fmt.Errorf("--%s takes no value", key)
 			}
@@ -135,7 +136,7 @@ func run(args []string, out io.Writer) error {
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
-	allowed := map[string]string{"run": "agent terminal repo base json", "delegate": "agent terminal repo base parent json", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": ""}
+	allowed := map[string]string{"run": "agent terminal repo base json detach client", "delegate": "agent terminal repo base parent json", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": ""}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -216,11 +217,7 @@ func run(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if o["json"] != "" {
-			return emit(out, t)
-		}
-		printTask(out, t)
-		fmt.Fprintf(out, "Attach: paddock attach %s\n", t.ID)
+		return presentLaunchedTask(ctx, command, t, o, out, os.Stderr, service.Attach)
 	case "message":
 		t, e := store.Get(pos[0])
 		if e != nil {
