@@ -16,6 +16,7 @@ mise install
 mise run build
 mise run check
 install -m 755 bin/paddock ~/.local/bin/paddock
+~/.local/bin/paddock skill setup
 ```
 
 Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting executable has no language runtime or database dependency. Keep the executable at a stable path while tasks are running: their delegation instructions refer to it.
@@ -37,6 +38,39 @@ paddock run "Implement feature X" --repo ~/code/example/project.git
 ```
 
 A plain directory named `project` next to `project.git` is not automatically a checkout. Paddock follows Git's repository discovery and does not guess sibling repository names. An existing linked worktree is also a valid starting directory.
+
+### Agent discovery across repositories
+
+Run `paddock skill setup` once per user on each machine. It installs a small discoverable
+skill for [Codex](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills)
+at `~/.agents/skills/paddock/SKILL.md` and for
+[Claude Code](https://code.claude.com/docs/en/skills#choose-where-skills-load) at
+`~/.claude/skills/paddock/SKILL.md`. No repository-level skill or `AGENTS.md` changes
+are required. Use `--agent codex` or `--agent claude` to target just one.
+
+```sh
+paddock skill status --json
+paddock skill show
+paddock skill remove
+```
+
+The agent sees the skill's name and description and can load it when relevant. The skill
+invokes `paddock skill show` using the executable's installed absolute path, so upgrading
+that binary updates the guide too. Re-run setup if the executable moves. Start a new
+agent session if an existing session has not discovered the new skill. You can also
+request `$paddock` in Codex or `/paddock` in Claude Code explicitly.
+
+Every Paddock-launched task receives its task ID, registry environment, and a direct
+command to read this same guide. That startup reference also works without global skill
+discovery. Setup creates no hooks and changes no agent approval settings. It updates
+only Paddock-managed skill files, refuses conflicting unmanaged files or symlinks, and
+removal preserves other files in the skill directory.
+
+The guide covers delegation, PR watch registration, author policy, and queued replies.
+Skills teach the workflow; installing one does not start a poller or configure GitHub
+access. A credentialed `paddock github poll --interval 30s` process still handles watched
+PRs and publishes agent replies. Agents reuse the configured workflow rather than
+starting a separate polling loop for each task.
 
 ### Repository names
 

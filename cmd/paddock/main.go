@@ -23,6 +23,7 @@ const help = `Paddock — a local control plane for coding agents
   paddock show <id> [--json]
   paddock attach <id> [--client Rex-client-id]
   paddock github --help
+  paddock skill setup|status|remove|show
   paddock repo add <name> <path>
   paddock repo list [--json]
   paddock repo remove <name>
@@ -130,6 +131,9 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "skill" {
+		return runSkill(args[1:], out)
+	}
 	if command == "github" {
 		return runGitHub(args[1:], out)
 	}
