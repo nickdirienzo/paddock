@@ -52,6 +52,7 @@ One-shot polling exits after processing available comments. To poll while your l
 is available, run `paddock github poll --interval 30s`; stop it with Ctrl-C. There is no
 webhook, hosted service, GitHub Actions workflow, or permanent daemon. Pagination covers
 both PR conversation comments and inline review comments. Closed PRs are skipped.
+Inline review requests delivered to the owning agent include the original file and line context.
 `paddock github unwatch PR_URL` stops polling that PR and retains its audit records.
 
 ## Conversation routing
