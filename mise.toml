@@ -1,0 +1,17 @@
+[tools]
+go = "1.27.2"
+
+[tasks.build]
+description = "Build the Paddock CLI"
+run = "go build -o bin/paddock ./cmd/paddock"
+
+[tasks.test]
+description = "Run unit and integration tests"
+run = "go test ./..."
+
+[tasks.check]
+description = "Run tests and static analysis"
+run = "go vet ./... && go test ./..."
+
+[tasks.fmt]
+run = "gofmt -w cmd internal"

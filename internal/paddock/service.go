@@ -1,0 +1,168 @@
+package paddock
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+type Service struct {
+	Store      *Store
+	Executable string
+}
+type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base string }
+
+func ValidateStateHome(home, repo string) error {
+	if rel, err := filepath.Rel(repo, home); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("PADDOCK_HOME must be outside the repository checkout")
+	}
+	return nil
+}
+
+func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
+	var empty Task
+	if strings.TrimSpace(o.Prompt) == "" {
+		return empty, fmt.Errorf("a non-empty task prompt is required")
+	}
+	if o.Agent == "" {
+		o.Agent = "codex"
+	}
+	if o.Agent != "codex" && o.Agent != "claude" {
+		return empty, fmt.Errorf("unknown agent %q (use codex or claude)", o.Agent)
+	}
+	if o.Parent != "" {
+		parent, err := s.Store.Get(o.Parent)
+		if err != nil {
+			return empty, err
+		}
+		o.Parent = parent.ID
+		if o.Repo == "" {
+			o.Repo = parent.Repo
+		}
+		if o.Backend == "" {
+			o.Backend = parent.Session.Backend
+		}
+	}
+	if o.Repo == "" {
+		var err error
+		o.Repo, err = os.Getwd()
+		if err != nil {
+			return empty, err
+		}
+	}
+	resolved, err := ResolveRepoArgument(s.Store.Home, o.Repo)
+	if err != nil {
+		return empty, err
+	}
+	o.Repo = resolved
+	repo, err := ResolveRepository(ctx, o.Repo, o.Base)
+	if err != nil {
+		return empty, err
+	}
+	trusted, err := RepoTrusted(s.Store.Home, repo.CommonDir)
+	if err != nil {
+		return empty, err
+	}
+	agentPath, err := executable("PADDOCK_"+strings.ToUpper(o.Agent)+"_BIN", o.Agent)
+	if err != nil {
+		return empty, fmt.Errorf("%s is not installed or executable: %w", o.Agent, err)
+	}
+	term, session, err := SelectTerminal(ctx, o.Backend)
+	if err != nil {
+		return empty, err
+	}
+	id := newID()
+	session.Agent = o.Agent
+	session.TrustProject = trusted && o.Agent == "codex"
+	session.AgentPath = agentPath
+	session.Name = "paddock-" + id
+	t := Task{ID: id, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
+		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), Session: session}
+	// Never put state or new worktrees inside the caller's checkout.
+	if err = ValidateStateHome(s.Store.Home, repo.Root); err != nil {
+		return empty, err
+	}
+	if err = s.Store.Insert(t); err != nil {
+		return empty, err
+	}
+	fail := func(cause error) (Task, error) {
+		if e := s.Store.Status(id, "failed", cause.Error(), "preparing", "starting"); e != nil {
+			return t, fmt.Errorf("task %s: %v; recording failure: %w", id, cause, e)
+		}
+		current, _ := s.Store.Get(id)
+		return current, fmt.Errorf("task %s: %w (inspect with paddock show %s)", id, cause, id)
+	}
+	if err = CreateWorktree(ctx, t); err != nil {
+		return fail(err)
+	}
+	if err = s.Store.Status(id, "starting", ""); err != nil {
+		return t, err
+	}
+	t.Status = "starting"
+	launched, launchErr := term.Launch(ctx, t, s.Executable, s.Store.Home)
+	if launchErr != nil {
+		// A timed-out launch may have succeeded. Inspect the deterministic name;
+		// never create a second session as an automatic retry.
+		recovered, obs := term.Inspect(ctx, t)
+		if obs.State == "running" || obs.State == "exited" {
+			launched = recovered
+		} else {
+			if obs.State == "unknown" {
+				return t, fmt.Errorf("task %s launch outcome is uncertain: %w; use show to reconcile before retrying", id, launchErr)
+			}
+			current, e := s.Store.Get(id)
+			if e == nil && current.Status != "starting" {
+				return current, nil
+			}
+			return fail(launchErr)
+		}
+	}
+	if err = s.Store.UpdateSession(id, func(v *Session) { v.ID = launched.ID; v.BlockID = launched.BlockID; v.WindowID = launched.WindowID }); err != nil {
+		return t, err
+	}
+	// Wait briefly for the supervisor to claim the task, catching silent failures.
+	for i := 0; i < 50; i++ {
+		t, err = s.Store.Get(id)
+		if err != nil {
+			return t, err
+		}
+		if t.Status != "starting" {
+			return t, nil
+		}
+		select {
+		case <-ctx.Done():
+			return t, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	_, obs := term.Inspect(ctx, t)
+	if obs.State == "missing" || obs.State == "exited" {
+		return fail(fmt.Errorf("terminal exited before the task supervisor started"))
+	}
+	return t, nil
+}
+
+func (s Service) Refresh(ctx context.Context, t Task) (Task, Observation, error) {
+	session, obs := terminalFor(t.Session).Inspect(ctx, t)
+	if session.ID != t.Session.ID || session.BlockID != t.Session.BlockID || session.WindowID != t.Session.WindowID {
+		if err := s.Store.UpdateSession(t.ID, func(v *Session) { v.ID = session.ID; v.BlockID = session.BlockID; v.WindowID = session.WindowID }); err != nil {
+			return t, obs, err
+		}
+	}
+	// starting has a grace period: another CLI may inspect between intent and launch.
+	age, _ := time.Parse(time.RFC3339Nano, t.UpdatedAt)
+	if (t.Status == "running" || (t.Status == "starting" && time.Since(age) > 30*time.Second)) && (obs.State == "missing" || obs.State == "exited") {
+		if err := s.Store.Status(t.ID, "interrupted", "terminal ended without a recorded agent exit", t.Status); err != nil {
+			return t, obs, err
+		}
+	}
+	current, err := s.Store.Get(t.ID)
+	return current, obs, err
+}
+
+func (s Service) Attach(ctx context.Context, t Task, client string) error {
+	return terminalFor(t.Session).Attach(ctx, t, client)
+}
