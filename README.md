@@ -88,7 +88,7 @@ Aliases map names to canonical absolute paths in the global `repos.json` file an
 
 `paddock repo remove project` removes only the alias; it leaves the repository, tasks, and worktrees intact. Remove an alias before mapping the same name to a different location. Existing tasks retain their resolved repository path, so changing aliases does not redirect delegated work. Alias writes use the same process lock and atomic file replacement as task records.
 
-### Codex repository trust
+### Repository trust
 
 To trust the worktrees Paddock creates for a repository:
 
@@ -111,6 +111,34 @@ For repositories trusted with `paddock repo trust`, new Codex sessions reuse hoo
 Decisions are shared only between existing Git worktrees of the same repository with byte-identical root `.codex/hooks.json` or `.codex/config.toml` files. Saved disabled decisions are carried too. Decisions already saved for the current worktree take precedence. Conflicting sibling decisions, changed source files, or unavailable source worktrees leave review to Codex. Codex still checks the saved hash against the current hook definition, including changes after Paddock prepared the launch.
 
 Global and plugin hooks retain Codex's normal persistence. Hook-script contents are not independently hashed by Paddock; the retained hash is Codex's hash of the hook definition. `CODEX_HOME` is honored and forwarded to the terminal when set. Already-running sessions retain their startup settings.
+
+### Reusing mise trust
+
+For repositories opted in with `paddock repo trust`, Paddock checks mise trust before
+starting the agent executable, including mise shims. It can reuse an existing approval
+from another registered worktree of the same repository. This covers bare repositories,
+where mise cannot inherit trust from a normal main checkout.
+
+Paddock confirms the source approval through `mise trust --show`, compares root mise
+config variants, version files, `package.json`, and mise config directories, then calls
+`mise trust` for the matching target config. A changed or additional config, symlink,
+unavailable source, explicit ignore, custom discovery override, or paranoid mode leaves
+approval to mise. Nested project configs outside those directories remain mise-managed.
+The check also applies to Claude tasks in a Paddock-trusted repository.
+
+This grants mise's normal directory-level trust for that individual worktree. It does
+not trust the parent worktrees directory or disable trust checks globally. Afterward,
+future edits inside that already-trusted directory follow mise's normal trust behavior;
+Paddock does not add continuous content enforcement or recursively validate commands
+referenced by the config. `paddock repo untrust` stops future reuse and does not revoke
+approvals already persisted by mise. Paranoid mode remains entirely under mise's control.
+
+`PADDOCK_MISE_BIN` can select a specific mise executable. With no mise installed, launch
+is unchanged. Tests against native mise use isolated configuration/state:
+
+```sh
+PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTrustReuse -v
+```
 
 ## Commands
 

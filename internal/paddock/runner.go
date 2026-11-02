@@ -56,6 +56,12 @@ func RunAgent(store *Store, id, exe string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	miseCtx, miseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	_, miseErr := (Service{Store: store}).ReuseMiseTrust(miseCtx, t)
+	miseCancel()
+	if miseErr != nil {
+		fmt.Fprintln(os.Stderr, "Could not reuse mise trust; mise may ask for approval:", miseErr)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	hookTrust, hookErr := codexHookTrust(ctx, t)
 	cancel()

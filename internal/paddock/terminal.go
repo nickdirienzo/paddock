@@ -125,7 +125,7 @@ func terminalFor(s Session) Terminal {
 func launchCommand(exe, home, id string) []string {
 	args := []string{"/usr/bin/env", "PADDOCK_HOME=" + home, "PATH=" + filepath.Dir(exe) + string(os.PathListSeparator) + os.Getenv("PATH")}
 	// Explicit non-secret configuration is forwarded to Rex's server environment.
-	for _, key := range []string{"PADDOCK_CODEX_BIN", "PADDOCK_CLAUDE_BIN", "PADDOCK_REX_BIN", "PADDOCK_SCREEN_BIN", "CODEX_HOME"} {
+	for _, key := range []string{"PADDOCK_CODEX_BIN", "PADDOCK_CLAUDE_BIN", "PADDOCK_REX_BIN", "PADDOCK_SCREEN_BIN", "PADDOCK_MISE_BIN", "CODEX_HOME", "MISE_STATE_DIR", "MISE_CONFIG_DIR", "XDG_STATE_HOME"} {
 		if v := os.Getenv(key); v != "" {
 			args = append(args, key+"="+v)
 		}
