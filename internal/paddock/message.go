@@ -46,7 +46,7 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 }
 
 func agentControlEnv(task Task) []string {
-	env := os.Environ()
+	env := credentialFreeEnvironment(os.Environ())
 	if task.Session.AgentHome != "" {
 		filtered := make([]string, 0, len(env)+1)
 		for _, v := range env {

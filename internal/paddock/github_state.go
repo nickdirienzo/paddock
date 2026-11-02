@@ -24,32 +24,36 @@ type GitHubWatch struct {
 func (w GitHubWatch) Key() string { return fmt.Sprintf("%s#%d", w.Repo, w.Number) }
 
 type GitHubEvent struct {
-	ID        string        `json:"id"`
-	WatchKey  string        `json:"watch_key"`
-	TaskID    string        `json:"task_id"`
-	Comment   GitHubComment `json:"comment"`
-	Plan      Plan          `json:"plan"`
-	Status    string        `json:"status"`
-	Result    string        `json:"result,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	UpdatedAt string        `json:"updated_at"`
+	Identity  GitHubIdentityBinding `json:"identity,omitzero"`
+	ID        string                `json:"id"`
+	WatchKey  string                `json:"watch_key"`
+	TaskID    string                `json:"task_id"`
+	Comment   GitHubComment         `json:"comment"`
+	Plan      Plan                  `json:"plan"`
+	Status    string                `json:"status"`
+	Result    string                `json:"result,omitempty"`
+	Error     string                `json:"error,omitempty"`
+	UpdatedAt string                `json:"updated_at"`
 }
 
 type GitHubPost struct {
-	ID      string `json:"id"`
-	EventID string `json:"event_id"`
-	Body    string `json:"body"`
-	Status  string `json:"status"`
-	URL     string `json:"url,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Identity GitHubIdentityBinding `json:"identity,omitzero"`
+	ID       string                `json:"id"`
+	EventID  string                `json:"event_id"`
+	Body     string                `json:"body"`
+	Status   string                `json:"status"`
+	URL      string                `json:"url,omitempty"`
+	Error    string                `json:"error,omitempty"`
 }
 
 type GitHubState struct {
-	Version  int                    `json:"version"`
-	Identity GitHubIdentity         `json:"identity"`
-	Watches  map[string]GitHubWatch `json:"watches"`
-	Events   map[string]GitHubEvent `json:"events"`
-	Posts    map[string]GitHubPost  `json:"posts"`
+	Version    int                       `json:"version"`
+	Identity   GitHubIdentity            `json:"identity,omitzero"`
+	Identities map[string]GitHubIdentity `json:"identities"`
+	Routes     map[string]string         `json:"routes"`
+	Watches    map[string]GitHubWatch    `json:"watches"`
+	Events     map[string]GitHubEvent    `json:"events"`
+	Posts      map[string]GitHubPost     `json:"posts"`
 }
 
 func githubID(value string) string {
@@ -64,7 +68,7 @@ func (s *Store) readGitHub() (GitHubState, error) {
 	var v GitHubState
 	b, err := os.ReadFile(filepath.Join(s.Home, "github.json"))
 	if errors.Is(err, os.ErrNotExist) {
-		return GitHubState{Version: 1, Watches: map[string]GitHubWatch{}, Events: map[string]GitHubEvent{}, Posts: map[string]GitHubPost{}}, nil
+		return GitHubState{Version: 1, Identities: map[string]GitHubIdentity{}, Routes: map[string]string{}, Watches: map[string]GitHubWatch{}, Events: map[string]GitHubEvent{}, Posts: map[string]GitHubPost{}}, nil
 	}
 	if err != nil {
 		return v, err
@@ -74,6 +78,32 @@ func (s *Store) readGitHub() (GitHubState, error) {
 	}
 	if v.Version != 1 || v.Watches == nil || v.Events == nil || v.Posts == nil {
 		return v, fmt.Errorf("unsupported or invalid github.json")
+	}
+	if v.Identities == nil {
+		v.Identities = map[string]GitHubIdentity{}
+	}
+	if v.Routes == nil {
+		v.Routes = map[string]string{}
+	}
+	if v.Identity.Mode != "" {
+		v.Identities["default"] = v.Identity
+		binding := bindGitHubIdentity("default", v.Identity)
+		for id, post := range v.Posts {
+			if post.Identity.Name == "" {
+				post.Identity = binding
+				v.Posts[id] = post
+			}
+		}
+		for id, event := range v.Events {
+			if event.Identity.Name == "" {
+				event.Identity = binding
+				v.Events[id] = event
+			}
+		}
+		if _, ok := v.Routes["*"]; !ok {
+			v.Routes["*"] = "default"
+		}
+		v.Identity = GitHubIdentity{}
 	}
 	return v, nil
 }

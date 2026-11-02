@@ -34,7 +34,7 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	}
 	c := exec.Command(t.Session.AgentPath, append(args, "--", prompt)...)
 	c.Dir = t.Worktree
-	c.Env = append(os.Environ(), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
+	c.Env = append(credentialFreeEnvironment(os.Environ()), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
 		"PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout

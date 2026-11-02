@@ -15,7 +15,7 @@ type Repository struct{ Root, CommonDir, Base, Commit string }
 // Ignore inherited Git location overrides: cwd is the repository contract.
 func gitEnv() []string {
 	var out []string
-	for _, v := range os.Environ() {
+	for _, v := range credentialFreeEnvironment(os.Environ()) {
 		k, _, _ := strings.Cut(v, "=")
 		switch k {
 		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES":

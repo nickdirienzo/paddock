@@ -68,9 +68,9 @@ func parse(args []string, allowed string) (map[string]string, []string, error) {
 		if _, ok := opts[key]; ok {
 			return nil, nil, fmt.Errorf("duplicate option --%s", key)
 		}
-		if key == "json" {
+		if key == "json" || key == "queue" {
 			if has {
-				return nil, nil, fmt.Errorf("--json takes no value")
+				return nil, nil, fmt.Errorf("--%s takes no value", key)
 			}
 			opts[key] = "true"
 			continue

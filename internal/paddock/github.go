@@ -20,6 +20,7 @@ type GitHubRemote interface {
 type GitHubCoordinator struct {
 	Service Service
 	Remote  GitHubRemote
+	remotes map[string]GitHubRemote
 }
 
 func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, authors []string) error {
@@ -34,10 +35,18 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	if len(authors) == 0 {
 		return fmt.Errorf("--allow requires at least one engineer login")
 	}
-	if err = g.Remote.ValidateIdentity(ctx); err != nil {
+	state, err := g.Service.Store.GitHubState()
+	if err != nil {
 		return err
 	}
-	pr, err := g.Remote.Pull(ctx, repo, n)
+	api, _, err := g.remoteFor(state, repo, nil)
+	if err != nil {
+		return err
+	}
+	if err = api.ValidateIdentity(ctx); err != nil {
+		return err
+	}
+	pr, err := api.Pull(ctx, repo, n)
 	if err != nil {
 		return err
 	}
@@ -58,7 +67,7 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	w := GitHubWatch{Repo: repo, Number: n, TaskID: task.ID, HeadRepo: pr.Head.Repo.FullName, HeadRef: pr.Head.Ref, Since: time.Now().UTC(), Authors: map[string]int64{}}
 	for _, login := range authors {
 		login = strings.TrimSpace(login)
-		id, err := g.Remote.UserID(ctx, login)
+		id, err := api.UserID(ctx, login)
 		if err != nil {
 			return err
 		}
@@ -100,9 +109,6 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 		return nil, err
 	}
 	defer release()
-	if err = g.Remote.ValidateIdentity(ctx); err != nil {
-		return nil, err
-	}
 	state, err := g.Service.Store.GitHubState()
 	if err != nil {
 		return nil, err
@@ -115,7 +121,14 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 	processed := []GitHubEvent{}
 	for _, key := range keys {
 		w := state.Watches[key]
-		pr, err := g.Remote.Pull(ctx, w.Repo, w.Number)
+		api, binding, err := g.remoteFor(state, w.Repo, nil)
+		if err != nil {
+			return processed, err
+		}
+		if err = api.ValidateIdentity(ctx); err != nil {
+			return processed, err
+		}
+		pr, err := api.Pull(ctx, w.Repo, w.Number)
 		if err != nil {
 			return processed, err
 		}
@@ -125,7 +138,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 		if pr.Head.Ref != w.HeadRef || !strings.EqualFold(pr.Head.Repo.FullName, w.HeadRepo) || !strings.EqualFold(pr.Base.Repo.FullName, w.Repo) {
 			return processed, fmt.Errorf("PR ownership changed for %s; update its watch explicitly", key)
 		}
-		comments, err := g.Remote.Comments(ctx, w.Repo, w.Number)
+		comments, err := api.Comments(ctx, w.Repo, w.Number)
 		if err != nil {
 			return processed, err
 		}
@@ -152,13 +165,13 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 			}
 			plan := Plan{Action: "ignore", Kind: "discussion", Reason: "author is not authorized"}
 			// Identity and authorization are enforced before the planner sees the text.
-			self := comment.User.Type == "Bot" || (state.Identity.Mode == "app" && strings.EqualFold(comment.User.Login, state.Identity.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
+			self := comment.User.Type == "Bot" || (binding.Mode == "app" && strings.EqualFold(comment.User.Login, binding.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
 			if self {
 				plan.Reason = "bot or Paddock-generated comment"
 			} else if authorizedGitHub(w, comment) {
-				plan = PlanRequest(Request{Body: comment.Body, Address: state.Identity.Login})
+				plan = PlanRequest(Request{Body: comment.Body, Address: binding.Login})
 			}
-			event := GitHubEvent{ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
+			event := GitHubEvent{Identity: binding, ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
 			claimed, err := g.Service.Store.claimGitHub(event)
 			if err != nil {
 				return processed, err
@@ -229,6 +242,23 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 			}
 		}
 	}
+	// Agent-authored App replies are queued without exposing credentials to the
+	// coding process. The credentialed poller sends them through the same outbox.
+	for _, post := range current.Posts {
+		if post.Status == "posted" {
+			continue
+		}
+		event, ok := current.Events[post.EventID]
+		if !ok {
+			continue
+		}
+		if _, ok = current.Watches[event.WatchKey]; !ok {
+			continue
+		}
+		if _, err = g.reply(ctx, post.EventID, post.Body); err != nil {
+			return processed, err
+		}
+	}
 	return processed, nil
 }
 func (g GitHubCoordinator) saveEvent(event GitHubEvent) error {
@@ -242,9 +272,6 @@ func (g GitHubCoordinator) Reply(ctx context.Context, eventID, body string) (Git
 		return GitHubPost{}, err
 	}
 	defer release()
-	if err = g.Remote.ValidateIdentity(ctx); err != nil {
-		return GitHubPost{}, err
-	}
 	return g.reply(ctx, eventID, body)
 }
 func (g GitHubCoordinator) reply(ctx context.Context, eventID, body string) (GitHubPost, error) {
@@ -271,17 +298,33 @@ func (g GitHubCoordinator) reply(ctx context.Context, eventID, body string) (Git
 		return post, fmt.Errorf("event author is no longer authorized")
 	}
 	id := githubID(eventID + "\x00" + body)
-	if existing, exists := state.Posts[id]; exists {
+	if existing, ok := state.Posts[id]; ok && existing.Status == "posted" {
+		return existing, nil
+	}
+	var pinned *GitHubIdentityBinding
+	if existing, ok := state.Posts[id]; ok {
+		pinned = &existing.Identity
+	} else if body == event.Result && event.Identity.Name != "" {
+		pinned = &event.Identity
+	}
+	api, binding, err := g.remoteFor(state, w.Repo, pinned)
+	if err != nil {
+		return post, err
+	}
+	if err = api.ValidateIdentity(ctx); err != nil {
+		return post, err
+	}
+	if existing, exists := state.Posts[id]; exists && existing.Status != "queued" {
 		if existing.Status == "posted" {
 			return existing, nil
 		}
 		// Reconcile a possibly successful POST, but never blindly issue it again.
-		comments, err := g.Remote.Comments(ctx, w.Repo, w.Number)
+		comments, err := api.Comments(ctx, w.Repo, w.Number)
 		if err != nil {
 			return existing, err
 		}
 		for _, c := range comments {
-			if strings.EqualFold(c.User.Login, state.Identity.Login) && strings.Contains(c.Body, "<!-- paddock:"+id+" -->") {
+			if strings.EqualFold(c.User.Login, binding.Login) && strings.Contains(c.Body, "<!-- paddock:"+id+" -->") {
 				existing.Status = "posted"
 				existing.URL = c.HTMLURL
 				existing.Error = ""
@@ -291,11 +334,19 @@ func (g GitHubCoordinator) reply(ctx context.Context, eventID, body string) (Git
 		}
 		return existing, fmt.Errorf("reply %s has an uncertain outcome; inspect GitHub before posting another reply", id)
 	}
-	post = GitHubPost{ID: id, EventID: eventID, Body: body, Status: "posting"}
-	if err = g.savePost(post); err != nil {
+	post = GitHubPost{Identity: binding, ID: id, EventID: eventID, Body: body, Status: "posting"}
+	// EnqueueReply can run while this process authenticates. Do not overwrite a
+	// concurrently queued principal with the earlier route snapshot.
+	if err = g.Service.Store.UpdateGitHub(func(v *GitHubState) error {
+		if existing, ok := v.Posts[id]; ok && (existing.Status != "queued" || existing.Identity != binding) {
+			return fmt.Errorf("reply changed while preparing to post; retry using its saved identity")
+		}
+		v.Posts[id] = post
+		return nil
+	}); err != nil {
 		return post, err
 	}
-	result, err := g.Remote.Reply(ctx, w.Repo, w.Number, event.Comment, body+"\n\n<!-- paddock:"+id+" -->")
+	result, err := api.Reply(ctx, w.Repo, w.Number, event.Comment, body+"\n\n<!-- paddock:"+id+" -->")
 	if err != nil {
 		post.Status = "uncertain"
 		post.Error = err.Error()
@@ -310,4 +361,42 @@ func (g GitHubCoordinator) reply(ctx context.Context, eventID, body string) (Git
 }
 func (g GitHubCoordinator) savePost(post GitHubPost) error {
 	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error { v.Posts[post.ID] = post; return nil })
+}
+
+// EnqueueReply needs no GitHub credentials. Author/task checks still apply, and
+// only the credentialed poller performs the eventual external write.
+func (g GitHubCoordinator) EnqueueReply(eventID, body string) (GitHubPost, error) {
+	var post GitHubPost
+	if strings.TrimSpace(body) == "" {
+		return post, fmt.Errorf("reply cannot be empty")
+	}
+	err := g.Service.Store.UpdateGitHub(func(state *GitHubState) error {
+		event, ok := state.Events[eventID]
+		if !ok {
+			return fmt.Errorf("event not found")
+		}
+		if task := os.Getenv("PADDOCK_TASK_ID"); task != "" && task != event.TaskID {
+			return fmt.Errorf("this agent does not own the PR event")
+		}
+		w, ok := state.Watches[event.WatchKey]
+		if !ok || w.TaskID != event.TaskID {
+			return fmt.Errorf("event no longer has an active watch")
+		}
+		if !authorizedGitHub(w, event.Comment) {
+			return fmt.Errorf("event author is no longer authorized")
+		}
+		id := githubID(eventID + "\x00" + body)
+		if existing, exists := state.Posts[id]; exists {
+			post = existing
+			return nil
+		}
+		binding, _, err := state.ResolveGitHubIdentity(w.Repo)
+		if err != nil {
+			return err
+		}
+		post = GitHubPost{Identity: binding, ID: id, EventID: eventID, Body: body, Status: "queued"}
+		state.Posts[id] = post
+		return nil
+	})
+	return post, err
 }
