@@ -98,17 +98,26 @@ access. Do not change routes or author policy unless the user requests that chan
 
 ## Poll and reply
 
-Watches are durable registrations; polling is a separate process. The operator can run:
+Watches are durable registrations. Successful `github watch` registration starts or
+reuses one shared background poller per registry. Check `paddock github status --json`:
+`poller.running` reports the process lease, `poller.last_error` reports the last pass's
+error, and `watch_sessions` reports whether each registered task is online.
 
 ```sh
-paddock github poll --interval 30s
+paddock github start                # reuse or start the shared service
+paddock github status --json
+paddock github stop                 # stop service; retain all watches
 ```
 
-Use one credentialed poller per registry. There is currently no managed poller
-start/status/stop command. `github status` shows saved state, not proof of a running
-poller. Do not spawn a background loop for every task. Reuse a known operator poller;
-if none is known, explain that continuous handling requires this command in a separate
-terminal. App credentials are deliberately excluded from the coding agent's environment.
+Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
+comments for offline sessions remain pending without an eyes reaction. Once that same
+registered task is running again, polling can deliver them. The poller does not restart
+agents. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
+or register a watch again; there is no automatic login service yet.
+
+App credentials are deliberately excluded from the coding agent's environment. If the
+shared poller is stopped and credentials are unavailable, give the operator the start
+command rather than fetching private keys or switching identities.
 
 Incoming GitHub requests include the event ID, author, review context, and exact reply
 command. Perform the requested work within scope, verify it, then report what changed:

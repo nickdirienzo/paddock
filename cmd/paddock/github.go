@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,13 +25,16 @@ const githubHelp = `GitHub coordination:
   paddock github identities
   paddock github watch <PR-URL> --task <id> --allow <engineer,engineer>
   paddock github unwatch <PR-URL>
+  paddock github start [--interval 30s]
+  paddock github stop
   paddock github poll [--interval 30s] [--json]
   paddock github status [--json]
   paddock github reply <event-id> "reply text" [--queue]
 
 Only explicitly watched PRs and authorized authors can create work.
 App mode signs JWTs with a private key and refreshes installation tokens in memory.
-No token is persisted. Without --interval, poll runs once and exits.
+No token is persisted. Watch registration starts or reuses one background poller.
+Without --interval, poll runs once and exits; interval polling runs in the foreground.
 `
 
 func runGitHub(args []string, out io.Writer) error {
@@ -41,7 +43,7 @@ func runGitHub(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
-	allowed, ok := map[string]string{"auth": "name mode login app-id installation-id private-key-file", "installations": "app-id private-key-file", "route": "identity", "unroute": "", "identities": "", "watch": "task allow", "unwatch": "", "poll": "interval json", "status": "json", "reply": "queue"}[command]
+	allowed, ok := map[string]string{"auth": "name mode login app-id installation-id private-key-file", "installations": "app-id private-key-file", "route": "identity", "unroute": "", "identities": "", "watch": "task allow", "unwatch": "", "start": "interval", "stop": "", "poll": "interval json", "status": "json", "reply": "queue"}[command]
 	if !ok {
 		return fmt.Errorf("unknown GitHub command; use paddock github --help")
 	}
@@ -53,7 +55,7 @@ func runGitHub(args []string, out io.Writer) error {
 		fmt.Fprint(out, githubHelp)
 		return nil
 	}
-	count := map[string]int{"auth": 0, "installations": 0, "route": 1, "unroute": 1, "identities": 0, "watch": 1, "unwatch": 1, "poll": 0, "status": 0, "reply": 2}[command]
+	count := map[string]int{"auth": 0, "installations": 0, "route": 1, "unroute": 1, "identities": 0, "watch": 1, "unwatch": 1, "start": 0, "stop": 0, "poll": 0, "status": 0, "reply": 2}[command]
 	if len(pos) != count {
 		return fmt.Errorf("%s expects %d arguments; see paddock github --help", command, count)
 	}
@@ -191,6 +193,11 @@ func runGitHub(args []string, out io.Writer) error {
 			return err
 		}
 		fmt.Fprintln(out, "Watching", pos[0], "for task", flags["task"])
+		status, e := coordinator.Service.StartGitHubPoller(ctx, 30*time.Second)
+		if e != nil {
+			return fmt.Errorf("watch registered, but poller startup failed: %w", e)
+		}
+		fmt.Fprintln(out, "Shared GitHub poller running, PID", status.PID)
 	case "unwatch":
 		repo, n, e := paddock.ParsePullRequest(pos[0])
 		if e != nil {
@@ -201,8 +208,38 @@ func runGitHub(args []string, out io.Writer) error {
 			return err
 		}
 		fmt.Fprintln(out, "Stopped watching", pos[0])
+	case "start":
+		interval := 30 * time.Second
+		if flags["interval"] != "" {
+			interval, err = time.ParseDuration(flags["interval"])
+			if err != nil || interval < 5*time.Second {
+				return fmt.Errorf("--interval must be at least 5s")
+			}
+		}
+		status, e := coordinator.Service.StartGitHubPoller(ctx, interval)
+		if e != nil {
+			return e
+		}
+		fmt.Fprintln(out, "Shared GitHub poller running, PID", status.PID, "interval", status.Interval)
+	case "stop":
+		if err := store.StopGitHubPoller(ctx); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "Shared GitHub poller stopped; watches retained.")
 	case "status":
-		return emit(out, state)
+		status, e := store.GitHubPollerStatus()
+		if e != nil {
+			return e
+		}
+		sessions := map[string]string{}
+		for key, watch := range state.Watches {
+			sessions[key] = coordinator.Service.WatchSessionState(ctx, watch.TaskID)
+		}
+		return emit(out, struct {
+			paddock.GitHubState
+			Poller   paddock.GitHubPollerStatus `json:"poller"`
+			Sessions map[string]string          `json:"watch_sessions"`
+		}{state, status, sessions})
 	case "reply":
 		queue := flags["queue"] != ""
 		if os.Getenv("PADDOCK_TASK_ID") != "" {
@@ -228,7 +265,7 @@ func runGitHub(args []string, out io.Writer) error {
 			if post.Status == "posted" {
 				fmt.Fprintln(out, post.URL)
 			} else {
-				fmt.Fprintln(out, "Reply", post.ID, "is", post.Status+"; run paddock github poll to publish queued replies.")
+				fmt.Fprintln(out, "Reply", post.ID, "is", post.Status+"; the shared GitHub poller publishes queued replies.")
 			}
 			return nil
 		}
@@ -245,46 +282,35 @@ func runGitHub(args []string, out io.Writer) error {
 				return fmt.Errorf("--interval must be at least 5s")
 			}
 		}
-		for {
-			events, e := coordinator.Poll(ctx)
-			if e != nil {
-				var receiptError *paddock.GitHubReceiptError
-				if !errors.As(e, &receiptError) {
-					return e
-				}
-				if interval != 0 {
-					fmt.Fprintln(os.Stderr, "paddock:", e)
-				}
+		report := func(events []paddock.GitHubEvent, pollErr error) error {
+			if pollErr != nil {
+				fmt.Fprintln(os.Stderr, "paddock:", pollErr)
 			}
 			if flags["json"] != "" {
-				if err = emit(out, events); err != nil {
-					return err
+				return emit(out, events)
+			}
+			for _, event := range events {
+				fmt.Fprintf(out, "%s %s %s %s\n", event.ID, event.Plan.Action, event.Status, event.Comment.HTMLURL)
+				if event.Receipt != "" {
+					fmt.Fprintln(out, "  eyes:", event.Receipt)
 				}
-			} else {
-				for _, event := range events {
-					fmt.Fprintf(out, "%s %s %s %s\n", event.ID, event.Plan.Action, event.Status, event.Comment.HTMLURL)
-					if event.Receipt != "" {
-						fmt.Fprintln(out, "  eyes:", event.Receipt)
-					}
-					if event.Error != "" {
-						fmt.Fprintln(out, " ", event.Error)
-					}
-				}
-				if len(events) == 0 {
-					fmt.Fprintln(out, "No new comments.")
+				if event.Error != "" {
+					fmt.Fprintln(out, " ", event.Error)
 				}
 			}
-			if interval == 0 {
-				return e
+			if len(events) == 0 && interval == 0 {
+				fmt.Fprintln(out, "No new comments.")
 			}
-			timer := time.NewTimer(interval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil
-			case <-timer.C:
-			}
+			return nil
 		}
+		if interval != 0 {
+			return coordinator.RunGitHubPoller(ctx, interval, report)
+		}
+		events, e := coordinator.Poll(ctx)
+		if err := report(events, nil); err != nil {
+			return err
+		}
+		return e
 	}
 	return nil
 }

@@ -128,90 +128,15 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 	}
 	sort.Strings(keys)
 	processed := []GitHubEvent{}
+	var watchErrors []error
 	for _, key := range keys {
-		w := state.Watches[key]
-		api, binding, err := g.remoteFor(state, w.Repo, nil)
+		events, err := g.pollWatch(ctx, state, key)
+		processed = append(processed, events...)
 		if err != nil {
-			return processed, err
+			watchErrors = append(watchErrors, fmt.Errorf("%s: %w", key, err))
 		}
-		if err = api.ValidateIdentity(ctx); err != nil {
-			return processed, err
-		}
-		pr, err := api.Pull(ctx, w.Repo, w.Number)
-		if err != nil {
-			return processed, err
-		}
-		if pr.State != "open" {
-			continue
-		}
-		if pr.Head.Ref != w.HeadRef || !strings.EqualFold(pr.Head.Repo.FullName, w.HeadRepo) || !strings.EqualFold(pr.Base.Repo.FullName, w.Repo) {
-			return processed, fmt.Errorf("PR ownership changed for %s; update its watch explicitly", key)
-		}
-		comments, err := api.Comments(ctx, w.Repo, w.Number)
-		if err != nil {
-			return processed, err
-		}
-		sort.Slice(comments, func(i, j int) bool {
-			if comments[i].CreatedAt.Equal(comments[j].CreatedAt) {
-				return comments[i].ID < comments[j].ID
-			}
-			return comments[i].CreatedAt.Before(comments[j].CreatedAt)
-		})
-		for _, comment := range comments {
-			if comment.CreatedAt.Before(w.Since) {
-				continue
-			}
-			id := githubEventID(w, comment)
-			if old, exists := state.Events[id]; exists {
-				if old.Status == "claimed" {
-					old.Status = "uncertain"
-					old.Error = "previous poll ended during an action; inspect the agent before taking further action"
-					if err = g.saveEvent(old); err != nil {
-						return processed, err
-					}
-				}
-				continue
-			}
-			plan := Plan{Action: "ignore", Kind: "discussion", Reason: "author is not authorized"}
-			// Identity and authorization are enforced before the planner sees the text.
-			self := comment.User.Type == "Bot" || (binding.Mode == "app" && strings.EqualFold(comment.User.Login, binding.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
-			if self {
-				plan.Reason = "bot or Paddock-generated comment"
-			} else if authorizedGitHub(w, comment) {
-				plan = PlanRequest(Request{Body: comment.Body})
-			}
-			event := GitHubEvent{Identity: binding, ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
-			claimed, err := g.Service.Store.claimGitHub(event)
-			if err != nil {
-				return processed, err
-			}
-			if !claimed {
-				continue
-			}
-			event.Status = "done"
-			if plan.Action != "ignore" {
-				task, err := g.Service.Store.Get(w.TaskID)
-				if err != nil {
-					event.Status = "failed"
-					event.Error = err.Error()
-				} else {
-					message := fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\n\n%s\n\nInterpret this comment in the context of your existing task. Acknowledgements and discussion may require no code changes. Report any result to the PR with: PADDOCK_HOME=%s %s github reply %s %s", comment.User.Login, comment.HTMLURL, comment.Path, comment.Line, plan.Text, quote(g.Service.Store.Home), quote(g.Service.Executable), id, quote("Describe the result and validation."))
-					thread, e := g.Service.Message(ctx, task, message)
-					if e != nil {
-						event.Status = "uncertain"
-						event.Error = e.Error()
-					} else {
-						event.Result = "Queued for agent session " + thread
-						event.Receipt = "pending"
-					}
-				}
-			}
-			event.UpdatedAt = now()
-			if err = g.saveEvent(event); err != nil {
-				return processed, err
-			}
-			processed = append(processed, event)
-			state.Events[id] = event
+		if ctx.Err() != nil {
+			return processed, ctx.Err()
 		}
 	}
 	// Resume result posting independently from agent delivery. Posting failures must
@@ -266,10 +191,114 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 		processed[i] = latest.Events[processed[i].ID]
 	}
 	if err := errors.Join(receiptErrors...); err != nil {
-		return processed, &GitHubReceiptError{Err: err}
+		watchErrors = append(watchErrors, &GitHubReceiptError{Err: err})
+	}
+	return processed, errors.Join(watchErrors...)
+}
+
+func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key string) ([]GitHubEvent, error) {
+	processed := []GitHubEvent{}
+	w := state.Watches[key]
+	if g.Service.WatchSessionState(ctx, w.TaskID) != "online" {
+		return processed, nil // Leave comments unclaimed until this registered agent is available.
+	}
+	api, binding, err := g.remoteFor(state, w.Repo, nil)
+	if err != nil {
+		return processed, err
+	}
+	if err = api.ValidateIdentity(ctx); err != nil {
+		return processed, err
+	}
+	pr, err := api.Pull(ctx, w.Repo, w.Number)
+	if err != nil {
+		return processed, err
+	}
+	if pr.State != "open" {
+		return processed, nil
+	}
+	if pr.Head.Ref != w.HeadRef || !strings.EqualFold(pr.Head.Repo.FullName, w.HeadRepo) || !strings.EqualFold(pr.Base.Repo.FullName, w.Repo) {
+		return processed, fmt.Errorf("PR ownership changed for %s; update its watch explicitly", key)
+	}
+	comments, err := api.Comments(ctx, w.Repo, w.Number)
+	if err != nil {
+		return processed, err
+	}
+	sort.Slice(comments, func(i, j int) bool {
+		if comments[i].CreatedAt.Equal(comments[j].CreatedAt) {
+			return comments[i].ID < comments[j].ID
+		}
+		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
+	})
+	for _, comment := range comments {
+		if comment.CreatedAt.Before(w.Since) {
+			continue
+		}
+		id := githubEventID(w, comment)
+		if old, exists := state.Events[id]; exists {
+			if old.Status == "claimed" {
+				old.Status = "uncertain"
+				old.Error = "previous poll ended during an action; inspect the agent before taking further action"
+				if err = g.saveEvent(old); err != nil {
+					return processed, err
+				}
+			}
+			continue
+		}
+		plan := Plan{Action: "ignore", Kind: "discussion", Reason: "author is not authorized"}
+		// Identity and authorization are enforced before the planner sees the text.
+		self := comment.User.Type == "Bot" || (binding.Mode == "app" && strings.EqualFold(comment.User.Login, binding.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
+		if self {
+			plan.Reason = "bot or Paddock-generated comment"
+		} else if authorizedGitHub(w, comment) {
+			plan = PlanRequest(Request{Body: comment.Body})
+		}
+		event := GitHubEvent{Identity: binding, ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
+		claimed, err := g.Service.Store.claimGitHub(event)
+		if err != nil {
+			return processed, err
+		}
+		if !claimed {
+			continue
+		}
+		event.Status = "done"
+		if plan.Action != "ignore" {
+			task, err := g.Service.Store.Get(w.TaskID)
+			if err != nil {
+				event.Status = "failed"
+				event.Error = err.Error()
+			} else {
+				message := fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\n\n%s\n\nInterpret this comment in the context of your existing task. Acknowledgements and discussion may require no code changes. Report any result to the PR with: PADDOCK_HOME=%s %s github reply %s %s", comment.User.Login, comment.HTMLURL, comment.Path, comment.Line, plan.Text, quote(g.Service.Store.Home), quote(g.Service.Executable), id, quote("Describe the result and validation."))
+				thread, e := g.Service.Message(ctx, task, message)
+				if errors.Is(e, ErrAgentOffline) {
+					// The agent exited after our liveness check. No queue call
+					// was attempted, so release only this unattempted claim.
+					if err := g.Service.Store.UpdateGitHub(func(v *GitHubState) error {
+						delete(v.Events, id)
+						return nil
+					}); err != nil {
+						return processed, err
+					}
+					break
+				}
+				if e != nil {
+					event.Status = "uncertain"
+					event.Error = e.Error()
+				} else {
+					event.Result = "Queued for agent session " + thread
+					event.Receipt = "pending"
+				}
+			}
+		}
+		event.UpdatedAt = now()
+		if err = g.saveEvent(event); err != nil {
+			return processed, err
+		}
+		processed = append(processed, event)
+		state.Events[id] = event
 	}
 	return processed, nil
 }
+
 func (g GitHubCoordinator) saveEvent(event GitHubEvent) error {
 	event.UpdatedAt = now()
 	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error { v.Events[event.ID] = event; return nil })
