@@ -2,6 +2,7 @@ package paddock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,12 +17,20 @@ type GitHubRemote interface {
 	UserID(context.Context, string) (int64, error)
 	Comments(context.Context, string, int) ([]GitHubComment, error)
 	Reply(context.Context, string, int, GitHubComment, string) (GitHubComment, error)
+	ReactEyes(context.Context, string, GitHubComment) error
 }
 type GitHubCoordinator struct {
 	Service Service
 	Remote  GitHubRemote
 	remotes map[string]GitHubRemote
 }
+
+// Receipt errors are recoverable without repeating delivery. Interval pollers
+// should report them and continue processing comments and queued result replies.
+type GitHubReceiptError struct{ Err error }
+
+func (e *GitHubReceiptError) Error() string { return e.Err.Error() }
+func (e *GitHubReceiptError) Unwrap() error { return e.Err }
 
 func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, authors []string) error {
 	repo, n, err := ParsePullRequest(raw)
@@ -169,7 +178,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 			if self {
 				plan.Reason = "bot or Paddock-generated comment"
 			} else if authorizedGitHub(w, comment) {
-				plan = PlanRequest(Request{Body: comment.Body, Address: binding.Login})
+				plan = PlanRequest(Request{Body: comment.Body})
 			}
 			event := GitHubEvent{Identity: binding, ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
 			claimed, err := g.Service.Store.claimGitHub(event)
@@ -186,35 +195,14 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 					event.Status = "failed"
 					event.Error = err.Error()
 				} else {
-					switch plan.Action {
-					case "message":
-						message := fmt.Sprintf("GitHub request from %s on %s\nReview context: %s:%d\n\n%s\n\nReport your result to the PR with: PADDOCK_HOME=%s %s github reply %s %s", comment.User.Login, comment.HTMLURL, comment.Path, comment.Line, plan.Text, quote(g.Service.Store.Home), quote(g.Service.Executable), id, quote("Describe the result and validation."))
-						thread, e := g.Service.Message(ctx, task, message)
-						if e != nil {
-							event.Status = "uncertain"
-							event.Error = e.Error()
-						} else {
-							event.Result = "Queued for agent session " + thread
-						}
-					case "delegate":
-						child, e := g.Service.Run(ctx, RunOptions{Prompt: plan.Text + "\n\nRequested in " + comment.HTMLURL, Parent: task.ID, Agent: task.Session.Agent, Base: task.Branch})
-						if e != nil {
-							event.Status = "uncertain"
-							event.Error = e.Error()
-						} else {
-							event.Result = "Delegated to task " + child.ID
-						}
-					case "reply":
-						event.Result = plan.Text
-						if plan.Text == "status" || plan.Text == "status?" {
-							event.Result = fmt.Sprintf("Task `%s` is `%s` (%s).", task.ID, task.Status, task.Session.Agent)
-						}
-						if plan.Text == "help" {
-							event.Result = "Use `paddock: message: ...`, `paddock: delegate: ...`, or `paddock: status`. Questions addressed to this identity go to the owning agent."
-						}
-					default:
-						event.Status = "failed"
-						event.Error = "unsupported planner action"
+					message := fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\n\n%s\n\nInterpret this comment in the context of your existing task. Acknowledgements and discussion may require no code changes. Report any result to the PR with: PADDOCK_HOME=%s %s github reply %s %s", comment.User.Login, comment.HTMLURL, comment.Path, comment.Line, plan.Text, quote(g.Service.Store.Home), quote(g.Service.Executable), id, quote("Describe the result and validation."))
+					thread, e := g.Service.Message(ctx, task, message)
+					if e != nil {
+						event.Status = "uncertain"
+						event.Error = e.Error()
+					} else {
+						event.Result = "Queued for agent session " + thread
+						event.Receipt = "pending"
 					}
 				}
 			}
@@ -232,7 +220,17 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 	if err != nil {
 		return processed, err
 	}
+	var receiptErrors []error
 	for _, event := range current.Events {
+		if event.Status == "done" && event.Receipt != "" {
+			if event.Receipt == "pending" {
+				if err := g.acknowledge(ctx, current, event); err != nil {
+					receiptErrors = append(receiptErrors, err)
+				}
+			}
+			continue
+		}
+		// Preserve any unfinished text acknowledgements from older versions.
 		if event.Status == "done" && event.Plan.Action != "ignore" && event.Result != "" {
 			if _, ok := current.Watches[event.WatchKey]; !ok {
 				continue
@@ -259,11 +257,49 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 			return processed, err
 		}
 	}
+	// Return the latest receipt status for events delivered in this invocation.
+	latest, err := g.Service.Store.GitHubState()
+	if err != nil {
+		return processed, err
+	}
+	for i := range processed {
+		processed[i] = latest.Events[processed[i].ID]
+	}
+	if err := errors.Join(receiptErrors...); err != nil {
+		return processed, &GitHubReceiptError{Err: err}
+	}
 	return processed, nil
 }
 func (g GitHubCoordinator) saveEvent(event GitHubEvent) error {
 	event.UpdatedAt = now()
 	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error { v.Events[event.ID] = event; return nil })
+}
+
+func (g GitHubCoordinator) acknowledge(ctx context.Context, state GitHubState, event GitHubEvent) error {
+	w, ok := state.Watches[event.WatchKey]
+	if !ok || w.TaskID != event.TaskID || !authorizedGitHub(w, event.Comment) {
+		return nil
+	}
+	api, _, err := g.remoteFor(state, w.Repo, &event.Identity)
+	if err == nil {
+		err = api.ValidateIdentity(ctx)
+	}
+	if err == nil {
+		err = api.ReactEyes(ctx, w.Repo, event.Comment)
+	}
+	if err != nil {
+		event.ReceiptError = err.Error()
+	} else {
+		event.Receipt = "posted"
+		event.ReceiptError = ""
+	}
+	if saveErr := g.saveEvent(event); saveErr != nil {
+		return saveErr
+	}
+	if err != nil {
+		return fmt.Errorf("comment delivered; eyes reaction pending for %s: %w", event.ID, err)
+	}
+	return nil
 }
 
 func (g GitHubCoordinator) Reply(ctx context.Context, eventID, body string) (GitHubPost, error) {

@@ -124,9 +124,12 @@ Do not bypass this with a personal-account comment. An identical reply is idempo
 different text creates another update. Uncertain posts are reconciled rather than
 blindly retried.
 
-PR instructions can request work with `paddock: message: ...`, independent work with
-`paddock: delegate: ...`, or status with `paddock: status`. Only explicitly watched PRs
-and authorized authors trigger actions. Incoming PR message delivery currently supports
+Every new, nonempty comment from an approved author on a watched PR is delivered to
+its owning task. No mention or command prefix is required. Interpret each comment in
+context; discussion or thanks may require no work. The poller adds 👀 after confirmed
+session delivery, independently of agent reasoning. This means queued, not completed.
+It does not create child tasks based on comment wording. Only explicitly watched PRs
+and authorized authors trigger delivery. Incoming PR message delivery currently supports
 Codex; Claude can run ordinary tasks but cannot receive this GitHub message adapter.
 
 Paddock does not automatically commit, push, create PRs, or merge. Those actions follow

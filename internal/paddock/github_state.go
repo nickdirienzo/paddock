@@ -24,16 +24,18 @@ type GitHubWatch struct {
 func (w GitHubWatch) Key() string { return fmt.Sprintf("%s#%d", w.Repo, w.Number) }
 
 type GitHubEvent struct {
-	Identity  GitHubIdentityBinding `json:"identity,omitzero"`
-	ID        string                `json:"id"`
-	WatchKey  string                `json:"watch_key"`
-	TaskID    string                `json:"task_id"`
-	Comment   GitHubComment         `json:"comment"`
-	Plan      Plan                  `json:"plan"`
-	Status    string                `json:"status"`
-	Result    string                `json:"result,omitempty"`
-	Error     string                `json:"error,omitempty"`
-	UpdatedAt string                `json:"updated_at"`
+	Identity     GitHubIdentityBinding `json:"identity,omitzero"`
+	ID           string                `json:"id"`
+	WatchKey     string                `json:"watch_key"`
+	TaskID       string                `json:"task_id"`
+	Comment      GitHubComment         `json:"comment"`
+	Plan         Plan                  `json:"plan"`
+	Status       string                `json:"status"`
+	Result       string                `json:"result,omitempty"`
+	Error        string                `json:"error,omitempty"`
+	Receipt      string                `json:"receipt,omitempty"`
+	ReceiptError string                `json:"receipt_error,omitempty"`
+	UpdatedAt    string                `json:"updated_at"`
 }
 
 type GitHubPost struct {

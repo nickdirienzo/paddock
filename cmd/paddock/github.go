@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -247,7 +248,13 @@ func runGitHub(args []string, out io.Writer) error {
 		for {
 			events, e := coordinator.Poll(ctx)
 			if e != nil {
-				return e
+				var receiptError *paddock.GitHubReceiptError
+				if !errors.As(e, &receiptError) {
+					return e
+				}
+				if interval != 0 {
+					fmt.Fprintln(os.Stderr, "paddock:", e)
+				}
 			}
 			if flags["json"] != "" {
 				if err = emit(out, events); err != nil {
@@ -256,6 +263,9 @@ func runGitHub(args []string, out io.Writer) error {
 			} else {
 				for _, event := range events {
 					fmt.Fprintf(out, "%s %s %s %s\n", event.ID, event.Plan.Action, event.Status, event.Comment.HTMLURL)
+					if event.Receipt != "" {
+						fmt.Fprintln(out, "  eyes:", event.Receipt)
+					}
 					if event.Error != "" {
 						fmt.Fprintln(out, " ", event.Error)
 					}
@@ -265,7 +275,7 @@ func runGitHub(args []string, out io.Writer) error {
 				}
 			}
 			if interval == 0 {
-				return nil
+				return e
 			}
 			timer := time.NewTimer(interval)
 			select {

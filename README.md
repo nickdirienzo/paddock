@@ -222,8 +222,10 @@ Screen sessions run detached from the launching CLI. Detach with **Ctrl-A, then 
 
 ## GitHub coordination
 
-Use PR conversations and review comments to message a task agent, delegate work, and
-post replies through a developer or team GitHub App identity. Named profiles map
+New comments from approved authors on a watched PR go directly to its task session,
+without mentions or command prefixes. The poller adds 👀 after confirmed delivery;
+the agent interprets the comment and posts results through a developer or team GitHub
+App identity. Named profiles map
 repositories or owners to personal/team Apps, with automatic installation-token refresh
 and protected local key storage. See the [setup and operating guide](docs/github.md)
 for authentication, routing, explicit watches, and restart behavior.

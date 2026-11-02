@@ -2,6 +2,7 @@ package paddock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,14 @@ import (
 )
 
 type fakeGitHub struct {
-	pr        PullRequest
-	comments  []GitHubComment
-	replies   []GitHubComment
-	failReply bool
+	pr             PullRequest
+	comments       []GitHubComment
+	replies        []GitHubComment
+	failReply      bool
+	reactions      map[int64]bool
+	reactionCalls  int
+	failReaction   bool
+	beforeReaction func(GitHubComment)
 }
 
 func (f *fakeGitHub) ValidateIdentity(context.Context) error                 { return nil }
@@ -33,6 +38,20 @@ func (f *fakeGitHub) Reply(_ context.Context, _ string, _ int, c GitHubComment, 
 		return GitHubComment{}, fmt.Errorf("lost response after accepted POST")
 	}
 	return reply, nil
+}
+func (f *fakeGitHub) ReactEyes(_ context.Context, _ string, c GitHubComment) error {
+	if f.beforeReaction != nil {
+		f.beforeReaction(c)
+	}
+	f.reactionCalls++
+	if f.reactions == nil {
+		f.reactions = map[int64]bool{}
+	}
+	f.reactions[c.ID] = true
+	if f.failReaction {
+		return fmt.Errorf("lost reaction response")
+	}
+	return nil
 }
 func testComment(id int64, body string, author int64) GitHubComment {
 	c := GitHubComment{ID: id, Body: body, Kind: "review", CreatedAt: time.Now().UTC(), HTMLURL: fmt.Sprintf("https://github.com/team/repo/pull/1#discussion_r%d", id)}
@@ -89,14 +108,14 @@ func TestGitHubRoundTripAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 4 || events[0].Status != "done" || events[1].Plan.Action != "ignore" || events[2].Plan.Action != "ignore" {
+	if len(events) != 4 || events[0].Status != "done" || events[1].Plan.Action != "message" || events[2].Plan.Action != "ignore" {
 		t.Fatal(events)
 	}
 	b, err := os.ReadFile(log)
-	if err != nil || strings.Count(string(b), "queue --thread") != 1 {
+	if err != nil || strings.Count(string(b), "queue --thread") != 3 {
 		t.Fatalf("delivery: %s %v", b, err)
 	}
-	if len(remote.replies) != 2 {
+	if len(remote.replies) != 0 || len(remote.reactions) != 3 {
 		t.Fatal(remote.replies)
 	}
 	reopened := openTestStore(t, s.Home)
@@ -105,7 +124,7 @@ func TestGitHubRoundTripAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(log)
-	if strings.Count(string(b), "queue --thread") != 1 || len(remote.replies) != 2 {
+	if strings.Count(string(b), "queue --thread") != 3 || len(remote.replies) != 0 || len(remote.reactions) != 3 {
 		t.Fatal("duplicated action after restart")
 	}
 	state, err := reopened.GitHubState()
@@ -121,9 +140,13 @@ func TestGitHubRoundTripAndRestart(t *testing.T) {
 }
 func TestGitHubPostReconciliation(t *testing.T) {
 	g, remote, _, _, _ := githubFixture(t)
-	remote.comments = []GitHubComment{testComment(1, "paddock: status", 7)}
+	remote.comments = []GitHubComment{testComment(1, "tests are failing", 7)}
+	events, err := g.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	remote.failReply = true
-	if _, err := g.Poll(context.Background()); err == nil {
+	if _, err := g.Reply(context.Background(), events[0].ID, "Fixed and tested."); err == nil {
 		t.Fatal("expected lost response")
 	}
 	remote.failReply = false
@@ -132,6 +155,48 @@ func TestGitHubPostReconciliation(t *testing.T) {
 	}
 	if len(remote.replies) != 1 {
 		t.Fatal("reposted accepted comment")
+	}
+}
+
+func TestGitHubAppFreeformDelivery(t *testing.T) {
+	g, remote, s, _, log := githubFixture(t)
+	if err := s.UpdateGitHub(func(v *GitHubState) error {
+		v.Identities = map[string]GitHubIdentity{"app": {
+			Mode: "app", Login: "mozziebot[bot]",
+			App: &GitHubAppConfig{AppID: 42, InstallationID: 99, KeyEnvironment: true},
+		}}
+		v.Routes = map[string]string{"team/*": "app"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bot := testComment(3, "@mozziebot tests are failing", 7)
+	bot.User.Type = "Bot"
+	remote.comments = []GitHubComment{
+		testComment(1, "tests are failing", 7),
+		testComment(2, "@mozziebot tests are failing", 99),
+		bot,
+		testComment(4, " \n", 7),
+	}
+	events, err := g.Poll(context.Background())
+	if err != nil || len(events) != 4 {
+		t.Fatalf("poll: %v %+v", err, events)
+	}
+	for _, event := range events {
+		if event.Comment.ID == 1 {
+			if event.Status != "done" || event.Plan.Action != "message" {
+				t.Fatal(event)
+			}
+		} else if event.Plan.Action != "ignore" {
+			t.Fatal("unexpected delivery", event)
+		}
+	}
+	if _, err = g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil || strings.Count(string(b), "queue --thread") != 1 || !strings.Contains(string(b), "tests are failing") {
+		t.Fatalf("expected one native message: %s %v", b, err)
 	}
 }
 func TestGitHubCrashClaimNeverReplays(t *testing.T) {
@@ -203,8 +268,8 @@ func TestGitHubOnlyExplicitWatchesAndNoReplayOfEdits(t *testing.T) {
 	if _, err := g.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Fatal("edited discussion replayed as work")
+	if b, err := os.ReadFile(log); err != nil || strings.Count(string(b), "queue --thread") != 1 || strings.Contains(string(b), "Please perform new work") {
+		t.Fatal("edited comment replayed", string(b), err)
 	}
 	if err := s.UpdateGitHub(func(v *GitHubState) error { delete(v.Watches, w.Key()); return nil }); err != nil {
 		t.Fatal(err)
@@ -239,63 +304,119 @@ func TestGitHubUncertainReplyIsNotResent(t *testing.T) {
 	}
 }
 
-func TestLiveGitHubDelegation(t *testing.T) {
-	backend := os.Getenv("PADDOCK_LIVE_TERMINAL")
-	if backend == "" {
-		t.Skip("set PADDOCK_LIVE_TERMINAL to verify GitHub-triggered delegation")
-	}
-	g, remote, s, w, _ := githubFixture(t)
-	exe := buildCLI(t)
-	repo := repoFixture(t)
-	parent, err := s.Get(w.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := ResolveRepository(context.Background(), repo, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent.Repo = repo
-	parent.CommonDir = resolved.CommonDir
-	parent.BaseCommit = resolved.Commit
-	gitTest(t, repo, "branch", parent.Branch)
-	parent.Session.Backend = backend
-	if err := s.update(parent.ID, func(v *Task) error { *v = parent; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	agent := script(t, "printf ready > ready\nwhile [ ! -f finish ]; do sleep 0.1; done\n")
-	t.Setenv("PADDOCK_CODEX_BIN", agent)
-	g.Service.Executable = exe
+func TestGitHubCommandTextStaysInParent(t *testing.T) {
+	g, remote, s, w, log := githubFixture(t)
 	remote.comments = []GitHubComment{testComment(1, "paddock: delegate: independent test work", 7)}
-	t.Cleanup(func() {
-		children, _ := s.List(parent.ID)
-		for _, child := range children {
-			cleanupTerminal(child)
+	if _, err := g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	children, err := s.List(w.TaskID)
+	if err != nil || len(children) != 0 {
+		t.Fatal("router created a child", children, err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(b), remote.comments[0].Body) {
+		t.Fatal("comment not delivered intact", string(b), err)
+	}
+}
+
+func TestGitHubReactionRetryNeverRedelivers(t *testing.T) {
+	g, remote, s, w, log := githubFixture(t)
+	c := testComment(1, "tests are failing", 7)
+	remote.comments = []GitHubComment{c}
+	remote.beforeReaction = func(c GitHubComment) {
+		state, err := s.GitHubState()
+		event := state.Events[githubEventID(w, c)]
+		if err != nil || event.Status != "done" || event.Receipt != "pending" {
+			t.Fatalf("reaction before durable delivery: %+v %v", event, err)
 		}
-	})
+		if b, err := os.ReadFile(log); err != nil || strings.Count(string(b), "queue --thread") != 1 {
+			t.Fatal("reaction before message delivery")
+		}
+	}
+	remote.failReaction = true
+	events, err := g.Poll(context.Background())
+	var receiptError *GitHubReceiptError
+	if !errors.As(err, &receiptError) || len(events) != 1 {
+		t.Fatal("expected reaction error", events, err)
+	}
+	state, _ := s.GitHubState()
+	event := state.Events[events[0].ID]
+	if event.Status != "done" || event.Receipt != "pending" || event.ReceiptError == "" {
+		t.Fatal(event)
+	}
+	// Result replies are still published even when the receipt cannot be posted.
+	if _, err = g.EnqueueReply(event.ID, "Fixed and tested."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = g.Poll(context.Background()); err == nil || len(remote.replies) != 1 {
+		t.Fatal("reaction failure blocked result", err, remote.replies)
+	}
+	remote.failReaction = false
+	g.Service.Store = openTestStore(t, s.Home)
 	if _, err = g.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	children, err := s.List(parent.ID)
-	if err != nil || len(children) != 1 {
-		t.Fatal(children, err)
-	}
-	child := children[0]
-	if child.ParentID != parent.ID || child.Worktree == parent.Worktree || child.BaseCommit != resolved.Commit {
-		t.Fatal(child)
-	}
-	waitFor(t, func() bool { _, err := os.Stat(filepath.Join(child.Worktree, "ready")); return err == nil })
-	reopened := openTestStore(t, s.Home)
-	g.Service.Store = reopened
 	if _, err = g.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	children, err = reopened.List(parent.ID)
-	if err != nil || len(children) != 1 {
-		t.Fatal("duplicated child", children, err)
+	state, _ = s.GitHubState()
+	event = state.Events[event.ID]
+	if event.Receipt != "posted" || event.ReceiptError != "" || len(remote.reactions) != 1 || remote.reactionCalls != 3 {
+		t.Fatal(event, remote.reactions, remote.reactionCalls)
 	}
-	if err = os.WriteFile(filepath.Join(child.Worktree, "finish"), nil, 0600); err != nil {
+	b, _ := os.ReadFile(log)
+	if strings.Count(string(b), "queue --thread") != 1 {
+		t.Fatal("redelivered after reaction retry", string(b))
+	}
+}
+
+func TestGitHubPendingReceiptRespectsAuthorizationAndIdentity(t *testing.T) {
+	for _, change := range []string{"unwatch", "revoke-author", "replace-identity"} {
+		t.Run(change, func(t *testing.T) {
+			g, remote, s, w, _ := githubFixture(t)
+			remote.comments = []GitHubComment{testComment(1, "tests are failing", 7)}
+			remote.failReaction = true
+			if _, err := g.Poll(context.Background()); err == nil {
+				t.Fatal("expected pending receipt")
+			}
+			remote.failReaction = false
+			if err := s.UpdateGitHub(func(v *GitHubState) error {
+				switch change {
+				case "unwatch":
+					delete(v.Watches, w.Key())
+				case "revoke-author":
+					watch := v.Watches[w.Key()]
+					watch.Authors = map[string]int64{}
+					v.Watches[w.Key()] = watch
+				case "replace-identity":
+					identity := v.Identities["default"]
+					identity.Login = "different-user"
+					v.Identities["default"] = identity
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := g.Poll(context.Background())
+			if change == "replace-identity" && err == nil {
+				t.Fatal("accepted changed receipt identity")
+			}
+			if remote.reactionCalls != 1 {
+				t.Fatal("retried receipt after policy change")
+			}
+		})
+	}
+}
+
+func TestGitHubUncertainDeliveryHasNoReaction(t *testing.T) {
+	g, remote, s, w, _ := githubFixture(t)
+	if err := s.update(w.TaskID, func(task *Task) error { task.Session.AgentPath = script(t, "exit 1\n"); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { task, err := s.Get(child.ID); return err == nil && task.Status == "completed" })
+	remote.comments = []GitHubComment{testComment(1, "tests are failing", 7)}
+	events, err := g.Poll(context.Background())
+	if err != nil || len(events) != 1 || events[0].Status != "uncertain" || remote.reactionCalls != 0 {
+		t.Fatal(events, err, remote.reactionCalls)
+	}
 }

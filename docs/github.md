@@ -14,10 +14,12 @@ Task ownership, authorized requesters, and the selected coding agent remain inde
 
 1. In your personal or organization settings, open **Developer settings → GitHub Apps →
    New GitHub App**. Choose the account that should own and administer the App.
-2. Grant **Pull requests: Read and write**. GitHub includes **Metadata: Read-only**.
-   No organization permissions are needed. Pull requests permission covers PR conversation
-   comments as well as review comments; separate Issues permission is unnecessary for this
-   PR-only integration. See [GitHub's comment permissions](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment).
+2. Grant **Pull requests: Read and write** and **Issues: Read and write**. GitHub
+   includes **Metadata: Read-only**. Pull requests permission covers PR comments and
+   inline review reactions; GitHub documents Issues write permission for reactions to
+   conversation comments. See [GitHub's reaction permissions](https://docs.github.com/en/rest/reactions/reactions#create-reaction-for-an-issue-comment).
+   Existing installations must accept added permissions before those reactions work.
+   No organization permissions are needed.
 3. Disable **Active** under Webhook. Leave OAuth callbacks and user authorization disabled.
    Choose **Any account** if the App needs installation outside its owning account.
 4. Create the App, generate a private key, and install it on the repositories Paddock
@@ -153,25 +155,16 @@ Inline review requests delivered to the owning agent include the original file a
 
 ## Conversation routing
 
-Authorization and self-comment filtering happen before planning. The shared local
-planner has a deliberately small vocabulary; the coding agent handles freeform reasoning:
+Every new, nonempty comment from an approved author on a watched PR is queued to
+that PR's existing task session. No mention, command prefix, keyword, or LLM routing
+step is needed. `tests are failing`, questions, and ordinary discussion all reach the
+same agent, which interprets them in context. Bot accounts and Paddock-generated
+comments are excluded before delivery.
 
-| Comment | Action |
-| --- | --- |
-| `Looks good, thanks!` | Record as discussion; create no work. |
-| `Please fix the nil check.` | Queue a message for the PR's existing task agent. |
-| `Can you add a regression test?` | Queue an actionable instruction. |
-| `@your-bot why does this happen?` | Queue an addressed question. |
-| `paddock: message: investigate this race` | Explicitly message the task agent. |
-| `paddock: delegate: add independent documentation` | Create a child task using the existing launcher. |
-| `paddock: status` | Reply with the recorded task status. |
-| `paddock: reply: Thanks, investigating.` | Post the explicitly requested text. |
-
-The `paddock:` command prefix is independent of the team's GitHub username. Ordinary
-unaddressed questions and unsupported wording remain discussion; use an explicit
-message command when intent could be ambiguous. Delegated work starts from committed
-parent-branch work, in a separate worktree. Nothing is automatically committed, pushed,
-merged, or turned into another PR.
+Mentions and old `paddock:` command-like text are passed through as comment text.
+The poller does not create child tasks, answer status questions, or execute instructions
+based on wording. Nothing is automatically committed, pushed, merged, or turned into
+another PR.
 
 Native messaging resolves the Codex session by its exact task worktree, remembers the
 conversation ID, and refuses ambiguous matches or tasks without confirmed running
@@ -179,8 +172,17 @@ terminals. It uses `codex queue`, not terminal keystrokes. This requires a Codex
 supporting `queue` and the app-server `thread/list` protocol. The local agent's existing
 permissions remain in effect.
 
-A successful action posts an acknowledgement to the originating review thread (or PR
-conversation). That acknowledgement means delivery/delegation, not completed coding work.
+After confirmed session delivery, the poller adds an 👀 reaction to the original
+conversation or inline review comment. This is a deterministic receipt that the comment
+was queued, not a claim that the agent has read it or completed the work. There is no
+extra delivery-acknowledgement comment. Failed or uncertain delivery gets no reaction.
+
+Reaction status is stored separately as `receipt` and `receipt_error` in
+`github status --json`. Failed reactions remain pending and are retried without
+redelivering the comment; GitHub returns the existing reaction if a previous request
+succeeded but its response was lost. Interval polling reports reaction errors and keeps
+running so a missing reaction permission does not stop delivery or result replies.
+One-shot polling exits with an error if receipts remain pending.
 To report the result, the agent or engineer can run:
 
 ```sh
