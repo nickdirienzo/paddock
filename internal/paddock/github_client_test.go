@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGitHubCLIHelper(t *testing.T) {
@@ -62,6 +65,42 @@ func TestGitHubCLIHelper(t *testing.T) {
 		os.Exit(9)
 	}
 	os.Exit(0)
+}
+
+func TestGitHubAppReactionEndpoints(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer fixture-token" || json.NewDecoder(r.Body).Decode(&body) != nil || body["content"] != "eyes" {
+			t.Error("invalid reaction request")
+		}
+		paths = append(paths, r.URL.Path)
+		if len(paths) == 1 {
+			w.WriteHeader(http.StatusCreated)
+		} else {
+			w.WriteHeader(http.StatusOK) // Existing reactions are successful too.
+		}
+		fmt.Fprint(w, `{"id":123,"content":"eyes"}`)
+	}))
+	defer server.Close()
+	api := NewGitHubAPI(GitHubIdentity{Mode: "app", App: &GitHubAppConfig{AppID: 42, InstallationID: 99}})
+	api.app.baseURL = server.URL
+	api.app.token = "fixture-token"
+	api.app.expires = time.Now().Add(time.Hour)
+	for _, kind := range []string{"discussion", "review", "review"} {
+		// React on the exact reply comment, not its parent thread comment.
+		if err := api.ReactEyes(context.Background(), "team/repo", GitHubComment{ID: 55, InReplyTo: 42, Kind: kind}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Join(paths, ",") != "/repos/team/repo/issues/comments/55/reactions,/repos/team/repo/pulls/comments/55/reactions,/repos/team/repo/pulls/comments/55/reactions" {
+		t.Fatal(paths)
+	}
+	for _, c := range []GitHubComment{{ID: -1, Kind: "review"}, {ID: 55, Kind: "unknown"}} {
+		if err := api.ReactEyes(context.Background(), "team/repo", c); err == nil {
+			t.Fatal("accepted invalid reaction target")
+		}
+	}
 }
 func TestGitHubTransportPaginationIdentityAndThreading(t *testing.T) {
 	dir := t.TempDir()

@@ -230,3 +230,21 @@ func (g GitHubAPI) Reply(ctx context.Context, repo string, n int, comment GitHub
 	err := g.request(ctx, "POST", path, map[string]string{"body": body}, &result)
 	return result, err
 }
+
+// GitHub returns the existing reaction when this identity already added eyes.
+// Retrying after a lost response is safe and does not create another reaction.
+func (g GitHubAPI) ReactEyes(ctx context.Context, repo string, comment GitHubComment) error {
+	if !githubRepoName.MatchString(repo) || comment.ID < 1 {
+		return fmt.Errorf("invalid repository or comment")
+	}
+	resource := "issues"
+	switch comment.Kind {
+	case "review":
+		resource = "pulls"
+	case "discussion":
+	default:
+		return fmt.Errorf("unsupported comment kind")
+	}
+	path := fmt.Sprintf("repos/%s/%s/comments/%d/reactions", repo, resource, comment.ID)
+	return g.request(ctx, "POST", path, map[string]string{"content": "eyes"}, nil)
+}
