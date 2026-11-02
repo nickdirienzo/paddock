@@ -145,6 +145,13 @@ paddock attach <id>
 
 Screen sessions run detached from the launching CLI. Detach with **Ctrl-A, then D**; the agent keeps running. Paddock ignores personal `.screenrc` commands when creating sessions. A Screen session ends when the agent exits; task records and worktrees remain, but that terminal can no longer be attached. Rex retains exited panes instead.
 
+## GitHub coordination
+
+Use PR conversations and review comments to message a task agent, delegate work, and
+post replies through a developer or team GitHub App identity. See the [setup and
+operating guide](docs/github.md) for explicit watches, authorization, polling, and
+restart behavior.
+
 ## Files and durability
 
 By default, one global registry lives at `${XDG_STATE_HOME:-~/.local/state}/paddock`. Set `PADDOCK_HOME` to an absolute path to use a separate registry. It must be outside the source repository checkout.

@@ -27,19 +27,21 @@ type Task struct {
 }
 
 type Session struct {
-	Agent        string `json:"agent"`
-	TrustProject bool   `json:"trust_project,omitempty"`
-	AgentPath    string `json:"agent_path"`
-	Backend      string `json:"backend"`
-	TerminalPath string `json:"terminal_path"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	Name         string `json:"name"`
-	ID           string `json:"id,omitempty"`
-	BlockID      string `json:"block_id,omitempty"`
-	WindowID     string `json:"window_id,omitempty"`
-	ExitCode     *int   `json:"exit_code,omitempty"`
-	StartedAt    string `json:"started_at,omitempty"`
-	EndedAt      string `json:"ended_at,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	AgentHome      string `json:"agent_home,omitempty"`
+	Agent          string `json:"agent"`
+	TrustProject   bool   `json:"trust_project,omitempty"`
+	AgentPath      string `json:"agent_path"`
+	Backend        string `json:"backend"`
+	TerminalPath   string `json:"terminal_path"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	Name           string `json:"name"`
+	ID             string `json:"id,omitempty"`
+	BlockID        string `json:"block_id,omitempty"`
+	WindowID       string `json:"window_id,omitempty"`
+	ExitCode       *int   `json:"exit_code,omitempty"`
+	StartedAt      string `json:"started_at,omitempty"`
+	EndedAt        string `json:"ended_at,omitempty"`
 }
 
 type Observation struct {

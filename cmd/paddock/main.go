@@ -18,9 +18,11 @@ const help = `Paddock — a local control plane for coding agents
   paddock run "prompt" [--agent codex|claude] [--terminal auto|rex|screen]
                       [--repo path] [--base ref] [--json]
   paddock delegate "prompt" [--parent id] [run options]
+  paddock message <id> "message"
   paddock tasks [--json]
   paddock show <id> [--json]
   paddock attach <id> [--client Rex-client-id]
+  paddock github --help
   paddock repo add <name> <path>
   paddock repo list [--json]
   paddock repo remove <name>
@@ -127,10 +129,13 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "github" {
+		return runGitHub(args[1:], out)
+	}
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
-	allowed := map[string]string{"run": "agent terminal repo base json", "delegate": "agent terminal repo base parent json", "tasks": "json", "show": "json", "attach": "client", "__run": ""}
+	allowed := map[string]string{"run": "agent terminal repo base json", "delegate": "agent terminal repo base parent json", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": ""}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -144,6 +149,9 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	expected := 1
+	if command == "message" {
+		expected = 2
+	}
 	if command == "tasks" {
 		expected = 0
 	}
@@ -213,6 +221,16 @@ func run(args []string, out io.Writer) error {
 		}
 		printTask(out, t)
 		fmt.Fprintf(out, "Attach: paddock attach %s\n", t.ID)
+	case "message":
+		t, e := store.Get(pos[0])
+		if e != nil {
+			return e
+		}
+		thread, e := service.Message(ctx, t, pos[1])
+		if e != nil {
+			return e
+		}
+		fmt.Fprintln(out, "Queued message for agent session", thread)
 	case "tasks":
 		tasks, err := store.List("")
 		if err != nil {

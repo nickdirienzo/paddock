@@ -76,6 +76,14 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	}
 	id := newID()
 	session.Agent = o.Agent
+	if o.Agent == "codex" {
+		session.AgentHome = os.Getenv("CODEX_HOME")
+		if session.AgentHome == "" {
+			if h, e := os.UserHomeDir(); e == nil {
+				session.AgentHome = filepath.Join(h, ".codex")
+			}
+		}
+	}
 	session.TrustProject = trusted && o.Agent == "codex"
 	session.AgentPath = agentPath
 	session.Name = "paddock-" + id
