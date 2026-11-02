@@ -134,7 +134,6 @@ Push the task branch and open its PR using your normal workflow, then register i
 ```sh
 paddock github watch https://github.com/your-team/project/pull/123 \
   --task TASK_ID --allow alice,bob
-paddock github poll
 paddock github status --json
 ```
 
@@ -146,12 +145,38 @@ to change allowed engineers. Only comments created after registration are consid
 Edited comments retain their event identity and are not executed again; post a new
 comment to request another action.
 
-One-shot polling exits after processing available comments. To poll while your laptop
-is available, run `paddock github poll --interval 30s`; stop it with Ctrl-C. There is no
-webhook, hosted service, GitHub Actions workflow, or permanent daemon. Pagination covers
-both PR conversation comments and inline review comments. Closed PRs are skipped.
-Inline review requests delivered to the owning agent include the original file and line context.
-`paddock github unwatch PR_URL` stops polling that PR and retains its audit records.
+Registering a watch starts or reuses **one background poller per registry**. It survives
+the registering CLI and individual agents exiting. It does not start automatically at
+login or reboot; run `paddock github start` or register a watch again.
+
+```sh
+paddock github start --interval 30s  # idempotent; existing interval is retained
+paddock github status --json
+paddock github stop                 # all registrations remain saved
+```
+
+Status includes `poller.running` (checked against the process lock), PID, mode, interval,
+last poll time/error, and log path. `watch_sessions` reports `online`, `offline`,
+`unknown`, `missing`, or `unsupported` for each PR's task. A running service may still
+report API errors; those are retried and don't terminate the service. To change the
+interval or load an upgraded binary, stop and start it. Logs live in
+`$PADDOCK_HOME/github-poller.log` (mode 0600).
+
+Offline or unconfirmed sessions are skipped before claiming comments. Their watches
+remain registered, and comments remain eligible when that same task is running again.
+The poller does not launch or restart agents. An exited agent's already queued replies
+and delivery receipts can still be published. Native message routing currently supports
+Codex; other agents are reported as unsupported.
+
+`paddock github poll` processes once. `paddock github poll --interval 30s` runs in the
+foreground and takes the same singleton lease; it refuses to start if a poller is
+already running. Ctrl-C stops that foreground process. One-shot poll/reply commands
+still use their separate action lock, so they cannot overlap a background poll pass.
+`github stop` requests cancellation by instance ID, without signaling a stored PID.
+
+Pagination covers PR conversation and inline review comments. Closed PRs are skipped.
+Inline requests include the original file and line context.
+`paddock github unwatch PR_URL` removes that registration and retains its audit records.
 
 ## Conversation routing
 
@@ -193,7 +218,7 @@ The delivered message includes the event ID and an absolute reply command. An ag
 with `PADDOCK_TASK_ID` set can reply only to events owned by its task. Replies use the
 repository's mapped GitHub identity. In App mode, replies from a task process
 (`PADDOCK_TASK_ID` set) are queued automatically without reading the key. The next
-`paddock github poll` publishes them; a foreground polling loop drains them regularly.
+`paddock github poll` publishes them; the shared background poller drains them regularly.
 Engineers can use `--queue` explicitly, or omit it to post synchronously. A queued reply
 prints its status rather than claiming a GitHub URL before publication. Bot accounts and Paddock-marked comments never trigger work.
 In development mode, the same account can write human comments and Paddock replies;

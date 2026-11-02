@@ -70,9 +70,10 @@ The guide makes watch registration part of creating a PR for a Paddock task, usi
 the approved author list, and asks agents to report watch and poller readiness when
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
-access. A credentialed `paddock github poll --interval 30s` process still handles watched
-PRs and publishes agent replies. Agents reuse the configured workflow rather than
-starting a separate polling loop for each task.
+access. Registering a watch starts or reuses one background poller per registry. It
+routes comments to online sessions and publishes queued replies; offline sessions keep
+their comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
+it. Agent exits leave the shared poller running. After reboot, start it again.
 
 ### Repository names
 

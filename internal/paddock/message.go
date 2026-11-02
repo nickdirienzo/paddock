@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrAgentOffline means delivery was not attempted and is safe to retry later.
+var ErrAgentOffline = errors.New("agent is offline")
 
 // Message uses the agent's native queue, never keyboard input into a terminal
 // that might currently be displaying an approval dialog.
@@ -26,7 +30,7 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 		return "", err
 	}
 	if task.Status != "running" || observation.State != "running" {
-		return "", fmt.Errorf("task %s does not have a confirmed running agent", task.ID)
+		return "", fmt.Errorf("%w: task %s does not have a confirmed running agent", ErrAgentOffline, task.ID)
 	}
 	thread, err := codexTaskThread(ctx, task)
 	if err != nil {
