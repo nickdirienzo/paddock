@@ -112,7 +112,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	var processed []GitHubEvent
+	processed := []GitHubEvent{}
 	for _, key := range keys {
 		w := state.Watches[key]
 		pr, err := g.Remote.Pull(ctx, w.Repo, w.Number)
@@ -205,6 +205,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 					}
 				}
 			}
+			event.UpdatedAt = now()
 			if err = g.saveEvent(event); err != nil {
 				return processed, err
 			}

@@ -45,6 +45,7 @@ func githubFixture(t *testing.T) (GitHubCoordinator, *fakeGitHub, *Store, GitHub
 	t.Helper()
 	s := openTestStore(t, t.TempDir())
 	task := taskFixture()
+	task.Branch = "paddock/" + task.ID
 	task.Status = "running"
 	task.Worktree = t.TempDir()
 	task.Session.Backend = "screen"
@@ -189,4 +190,112 @@ func TestParsePullRequest(t *testing.T) {
 	if repo, n, err := ParsePullRequest("https://github.com/team/repo/pull/12"); err != nil || repo != "team/repo" || n != 12 {
 		t.Fatal(repo, n, err)
 	}
+}
+
+func TestGitHubOnlyExplicitWatchesAndNoReplayOfEdits(t *testing.T) {
+	g, remote, s, w, log := githubFixture(t)
+	c := testComment(1, "Looks good", 7)
+	remote.comments = []GitHubComment{c}
+	if _, err := g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	remote.comments[0].Body = "Please perform new work"
+	if _, err := g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatal("edited discussion replayed as work")
+	}
+	if err := s.UpdateGitHub(func(v *GitHubState) error { delete(v.Watches, w.Key()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	remote.comments = append(remote.comments, testComment(2, "Please fix this", 7))
+	events, err := g.Poll(context.Background())
+	if err != nil || len(events) != 0 {
+		t.Fatal(events, err)
+	}
+}
+
+func TestGitHubUncertainReplyIsNotResent(t *testing.T) {
+	g, remote, s, w, _ := githubFixture(t)
+	c := testComment(1, "paddock: status", 7)
+	event := GitHubEvent{ID: githubEventID(w, c), WatchKey: w.Key(), TaskID: w.TaskID, Comment: c, Plan: PlanRequest(Request{Body: c.Body}), Status: "done", Result: "done"}
+	if err := g.saveEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	id := githubID(event.ID + "\x00" + event.Result)
+	if err := g.savePost(GitHubPost{ID: id, EventID: event.ID, Body: event.Result, Status: "posting"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Poll(context.Background()); err == nil {
+		t.Fatal("expected uncertain post")
+	}
+	if len(remote.replies) != 0 {
+		t.Fatal("resent uncertain post")
+	}
+	state, err := s.GitHubState()
+	if err != nil || len(state.Posts) != 1 {
+		t.Fatal(state, err)
+	}
+}
+
+func TestLiveGitHubDelegation(t *testing.T) {
+	backend := os.Getenv("PADDOCK_LIVE_TERMINAL")
+	if backend == "" {
+		t.Skip("set PADDOCK_LIVE_TERMINAL to verify GitHub-triggered delegation")
+	}
+	g, remote, s, w, _ := githubFixture(t)
+	exe := buildCLI(t)
+	repo := repoFixture(t)
+	parent, err := s.Get(w.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveRepository(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.Repo = repo
+	parent.CommonDir = resolved.CommonDir
+	parent.BaseCommit = resolved.Commit
+	gitTest(t, repo, "branch", parent.Branch)
+	parent.Session.Backend = backend
+	if err := s.update(parent.ID, func(v *Task) error { *v = parent; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	agent := script(t, "printf ready > ready\nwhile [ ! -f finish ]; do sleep 0.1; done\n")
+	t.Setenv("PADDOCK_CODEX_BIN", agent)
+	g.Service.Executable = exe
+	remote.comments = []GitHubComment{testComment(1, "paddock: delegate: independent test work", 7)}
+	t.Cleanup(func() {
+		children, _ := s.List(parent.ID)
+		for _, child := range children {
+			cleanupTerminal(child)
+		}
+	})
+	if _, err = g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	children, err := s.List(parent.ID)
+	if err != nil || len(children) != 1 {
+		t.Fatal(children, err)
+	}
+	child := children[0]
+	if child.ParentID != parent.ID || child.Worktree == parent.Worktree || child.BaseCommit != resolved.Commit {
+		t.Fatal(child)
+	}
+	waitFor(t, func() bool { _, err := os.Stat(filepath.Join(child.Worktree, "ready")); return err == nil })
+	reopened := openTestStore(t, s.Home)
+	g.Service.Store = reopened
+	if _, err = g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	children, err = reopened.List(parent.ID)
+	if err != nil || len(children) != 1 {
+		t.Fatal("duplicated child", children, err)
+	}
+	if err = os.WriteFile(filepath.Join(child.Worktree, "finish"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { task, err := s.Get(child.ID); return err == nil && task.Status == "completed" })
 }
