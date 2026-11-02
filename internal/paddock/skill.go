@@ -14,7 +14,7 @@ var AgentGuide string
 const skillMarker = "<!-- Managed by paddock skill setup; remove with paddock skill remove. -->"
 
 func SkillStub(executable string) string {
-	return "---\nname: paddock\ndescription: Use Paddock to launch, inspect, delegate, and reconnect local coding tasks, or handle watched pull requests and replies. Use when asked to coordinate work with Paddock or when PADDOCK_TASK_ID identifies the current task.\n---\n" + skillMarker + "\n\nRead the guide from the installed Paddock CLI and follow it for this task:\n\n```sh\n" + quote(executable) + " skill show\n```\n\nThe guide is bundled with the executable, so CLI upgrades update the instructions.\nIf that executable has moved, use `paddock skill show` and rerun `paddock skill setup`\nfrom the installed binary to update this reference.\n"
+	return "---\nname: paddock\ndescription: Use Paddock to launch, inspect, delegate, and reconnect local coding tasks, register PR watches, and handle replies. Use when creating a PR for a Paddock task, when asked to coordinate work with Paddock, or when PADDOCK_TASK_ID identifies the current task.\n---\n" + skillMarker + "\n\nRead the guide from the installed Paddock CLI and follow it for this task:\n\n```sh\n" + quote(executable) + " skill show\n```\n\nThe guide is bundled with the executable, so CLI upgrades update the instructions.\nIf that executable has moved, use `paddock skill show` and rerun `paddock skill setup`\nfrom the installed binary to update this reference.\n"
 }
 
 type SkillInstallation struct {

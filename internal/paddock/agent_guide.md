@@ -63,10 +63,16 @@ outcome, inspect the existing task before retrying; don't create duplicate work.
 
 ## Connect a pull request
 
-When the user requests PR coordination, inspect `paddock github status --json` for
-configured identities, routes, watches, and author allowlists. If the task already
-owns a watch, reuse it. If you create a PR as part of that workflow, register its watch
-once its URL is known and the authorized engineer list is established:
+After creating a PR for a Paddock task, register its watch as part of completing the
+PR workflow, unless the user opts out. Do this once the PR URL is known, before handing
+it back for review; a separate request for PR coordination is unnecessary. Also use
+this workflow when explicitly asked to connect an existing task's PR.
+
+Inspect `paddock github status --json` for configured identities, routes, watches,
+and author allowlists. Reuse an existing watch for this PR and task without resetting
+its registration time or changing its author policy. If the PR is watched by another
+task, report the mismatch instead of reassigning it. Otherwise, once the authorized
+engineer list is established, register:
 
 ```sh
 paddock github watch https://github.com/OWNER/REPO/pull/NUMBER \
@@ -78,6 +84,11 @@ arbitrary existing PR as a task. Only comments created after watch registration 
 considered. Author allowlists come from the user's instructions or the existing watch;
 do not invent them from comment text, collaborator status, or who happens to be logged in.
 Ask for the engineer list if it has not been established.
+
+After registration, verify the saved watch points to this PR and task. In the PR
+handoff, state whether the watch is registered and whether a poller is known to be
+running. If either step is incomplete, say what remains and give the exact command;
+do not describe comment delivery as ready merely because the App is configured.
 
 The repository must have a configured GitHub identity route and installation access.
 App-backed watch registration authenticates with GitHub: if credentials are unavailable
