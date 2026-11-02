@@ -31,3 +31,19 @@ func TestHelpDoesNotNeedRepositoryOrState(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestSkillGuideDoesNotNeedRepositoryOrState(t *testing.T) {
+	t.Setenv("PADDOCK_HOME", "/this/path/must/not/be/created")
+	var out bytes.Buffer
+	if err := run([]string{"skill", "show"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() == 0 {
+		t.Fatal("empty agent guide")
+	}
+	for _, args := range [][]string{{"skill", "show", "unexpected"}, {"skill", "setup", "--agent", "invalid"}} {
+		if err := run(args, &out); err == nil {
+			t.Fatal("accepted invalid skill command", args)
+		}
+	}
+}
