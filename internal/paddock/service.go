@@ -25,7 +25,11 @@ func ValidateStateHome(home, repo string) error {
 func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	var empty Task
 	if o.Runtime == "" {
-		o.Runtime = "openshell"
+		var err error
+		o.Runtime, err = s.Store.DefaultRuntime()
+		if err != nil {
+			return empty, err
+		}
 	}
 	if o.Runtime != "host" && o.Runtime != "openshell" {
 		return empty, fmt.Errorf("unknown runtime %q (use openshell or host)", o.Runtime)

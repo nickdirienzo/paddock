@@ -4,8 +4,10 @@ Paddock runs local coding tasks in Git worktrees and persistent terminals. Use t
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.
 
-New tasks default to OpenShell. `--runtime host` is an explicit opt-out; missing
-OpenShell setup must not trigger a host fallback. See `paddock runtime --help`.
+New tasks use the configured default (`paddock runtime default`), initially OpenShell.
+An operator can explicitly choose `paddock runtime default host`; `--runtime` overrides
+that choice for one task. Missing OpenShell setup never triggers a host fallback.
+See `paddock runtime --help`.
 Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
 and watches, and its CLI is not exposed in the sandbox. The host poller discovers
 PRs for the task's exact branch when approved `watch_authors` are configured.
@@ -93,7 +95,10 @@ The PR's head branch and repository must match the task. Paddock cannot adopt an
 arbitrary existing PR as a task. Only comments created after watch registration are
 considered. Author allowlists come from the user's instructions or the existing watch;
 do not invent them from comment text, collaborator status, or who happens to be logged in.
-Ask for the engineer list if it has not been established.
+If the user explicitly wants any user, register with `--allow '*'` (quoted).
+This includes future users and non-collaborators who can comment on the PR; bots
+remain excluded. Do not substitute a snapshot of repository collaborators for this
+policy. Ask for the author policy if it has not been established.
 
 After registration, verify the saved watch points to this PR and task. In the PR
 handoff, state whether the watch is registered and whether a poller is known to be
@@ -147,6 +152,10 @@ With default direct routing, every new, nonempty comment from an approved author
 its owning task. No mention or command prefix is required. Interpret each comment in
 context; discussion or thanks may require no work. The poller adds 👀 after confirmed
 session delivery, independently of agent reasoning. This means queued, not completed.
+A submitted review arrives as one message with its summary and inline comments.
+Read the whole review and address shared concerns together; each inline comment keeps
+its own reply command and eyes receipt. Later thread replies and standalone comments
+arrive individually. GitHub does not support eyes reactions on review summaries.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
 and authorized authors trigger delivery. Incoming PR message delivery supports
 Codex and OpenShell Claude tasks. Host Claude tasks have no native delivery adapter.

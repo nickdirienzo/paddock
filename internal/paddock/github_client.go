@@ -48,12 +48,15 @@ type GitHubComment struct {
 		ID    int64  `json:"id"`
 		Type  string `json:"type"`
 	} `json:"user"`
-	CreatedAt time.Time `json:"created_at"`
-	HTMLURL   string    `json:"html_url"`
-	Path      string    `json:"path,omitempty"`
-	Line      int       `json:"line,omitempty"`
-	InReplyTo int64     `json:"in_reply_to_id,omitempty"`
-	Kind      string    `json:"kind"`
+	CreatedAt   time.Time `json:"created_at"`
+	HTMLURL     string    `json:"html_url"`
+	Path        string    `json:"path,omitempty"`
+	Line        int       `json:"line,omitempty"`
+	InReplyTo   int64     `json:"in_reply_to_id,omitempty"`
+	Kind        string    `json:"kind"`
+	ReviewID    int64     `json:"pull_request_review_id,omitempty"`
+	SubmittedAt time.Time `json:"submitted_at,omitempty"`
+	ReviewState string    `json:"state,omitempty"`
 }
 
 var githubRepoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -188,19 +191,32 @@ func (g GitHubAPI) Comments(ctx context.Context, repo string, n int) ([]GitHubCo
 		return nil, fmt.Errorf("invalid repository or PR")
 	}
 	var all []GitHubComment
-	for _, kind := range []string{"discussion", "review"} {
+	// Read submissions before comments. A concurrently submitted review's inline
+	// comments wait for the next complete snapshot instead of arriving piecemeal.
+	for _, kind := range []string{"review_submission", "discussion", "review"} {
 		resource := "issues"
-		if kind == "review" {
+		endpoint := "comments"
+		if kind != "discussion" {
 			resource = "pulls"
+		}
+		if kind == "review_submission" {
+			endpoint = "reviews"
 		}
 		for page := 1; page <= 10000; page++ {
 			var comments []GitHubComment
-			path := fmt.Sprintf("repos/%s/%s/%d/comments?per_page=100&page=%d", repo, resource, n, page)
+			path := fmt.Sprintf("repos/%s/%s/%d/%s?per_page=100&page=%d", repo, resource, n, endpoint, page)
 			if err := g.request(ctx, "GET", path, nil, &comments); err != nil {
 				return nil, err
 			}
 			for _, comment := range comments {
 				comment.Kind = kind
+				if kind == "review_submission" {
+					if comment.SubmittedAt.IsZero() || comment.ReviewState == "PENDING" {
+						continue
+					}
+					comment.CreatedAt = comment.SubmittedAt
+					comment.ReviewID = comment.ID
+				}
 				all = append(all, comment)
 			}
 			if len(comments) < 100 {

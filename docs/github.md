@@ -145,6 +145,23 @@ to change allowed engineers. Only comments created after registration are consid
 Edited comments retain their event identity and are not executed again; post a new
 comment to request another action.
 
+To accept comments from **any GitHub user**, including future users, opt in explicitly:
+
+```sh
+paddock github watch https://github.com/your-team/project/pull/123 \
+  --task TASK_ID --allow '*'
+```
+
+Quote the wildcard so your shell does not expand it. This permits any human account
+that can comment on that PR, including non-collaborators on public repositories.
+It is not a snapshot of the collaborator list. Bot accounts and Paddock-generated
+replies remain excluded. The wildcard must be used alone. Existing watches remain
+restricted until you update them; re-run `watch` with named accounts to narrow access.
+Status exposes this policy as `allow_any_user: true`.
+After upgrading, restart any running poller with the upgraded CLI's `github stop`
+and `github start` commands before registering wildcard watches. Registration
+refuses an older running poller rather than saving a policy it cannot enforce.
+
 Registering a watch starts or reuses **one background poller per registry**. It survives
 the registering CLI and individual agents exiting. It does not start automatically at
 login or reboot; run `paddock github start` or register a watch again.
@@ -258,3 +275,17 @@ session. Scope is configured by the operator and does not come from comment text
 Direct routing remains the default and shares the same signal executor and replay
 protection. See [orchestration](orchestration.md) for model/prompt configuration,
 context reads, action types, and recovery semantics.
+
+### Submitted reviews
+
+A submitted review is delivered as one message containing its summary and inline
+comments. Paddock groups by GitHub review ID, so the agent can consider shared
+architecture concerns before changing individual lines. Draft reviews are not
+delivered. Standalone PR comments and later inline-thread replies remain individual
+messages. Comments drafted before watch registration are included if their review
+is submitted afterward.
+
+Each inline comment keeps its own reply target and receives 👀 after the grouped
+message is queued. GitHub has no reaction endpoint for the review summary itself.
+Persisted batch membership prevents replaying already delivered comments after a
+restart or upgrade; uncertain delivery requires inspection instead of blind retry.

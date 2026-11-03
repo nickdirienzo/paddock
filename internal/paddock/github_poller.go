@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const githubPollerVersion = 2 // v2 understands allow_any_user watch policies.
+
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
 type GitHubPollerStatus struct {
@@ -221,7 +223,7 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 		mode = "foreground"
 		instance = newID()
 	}
-	status := GitHubPollerStatus{RuntimeVersion: 1, Running: true, Instance: instance, PID: os.Getpid(), Mode: mode, Interval: interval.String(), StartedAt: now(), Log: s.pollerFile(".log")}
+	status := GitHubPollerStatus{RuntimeVersion: githubPollerVersion, Running: true, Instance: instance, PID: os.Getpid(), Mode: mode, Interval: interval.String(), StartedAt: now(), Log: s.pollerFile(".log")}
 	if err = writeJSONAtomic(s.pollerFile(".json"), status); err != nil {
 		return err
 	}

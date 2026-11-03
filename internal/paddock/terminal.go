@@ -263,6 +263,9 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 				}
 			}
 			if missing {
+				if len(blocks.Blocks) != 0 {
+					return unknown(fmt.Errorf("tracked Rex pane is missing but other panes remain; inspect and reconnect the existing agent before resuming"))
+				}
 				return s, Observation{State: "missing"}
 			}
 		}

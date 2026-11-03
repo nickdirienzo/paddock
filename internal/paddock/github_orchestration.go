@@ -64,6 +64,13 @@ func (g GitHubCoordinator) routeSignal(ctx context.Context, w GitHubWatch, event
 		}
 	}
 	signal := Signal{Source: "github", ID: event.ID, Body: event.Comment.Body, TaskID: w.TaskID}
+	if event.Comment.Kind == "review_submission" {
+		var err error
+		signal.Body, err = g.reviewBody(event)
+		if err != nil {
+			return event, err
+		}
+	}
 	orchestrator := Orchestrator{Service: g.Service, Planner: planner, GitHub: &g}
 	record, err := orchestrator.Process(ctx, signal, OrchestrationOptions{Mode: mode, Policy: policy})
 	event.SignalKey = signal.Key()
@@ -115,10 +122,16 @@ func (g GitHubCoordinator) grantSignalRecipient(eventID, taskID string) error {
 		if !ok || !authorizedGitHub(w, e.Comment) {
 			return fmt.Errorf("event no longer authorized")
 		}
-		if !slices.Contains(e.RecipientTaskIDs, taskID) {
-			e.RecipientTaskIDs = append(e.RecipientTaskIDs, taskID)
+		for _, id := range append([]string{eventID}, e.ReviewMembers...) {
+			member, ok := state.Events[id]
+			if !ok || !authorizedGitHub(w, member.Comment) {
+				return fmt.Errorf("review member no longer authorized")
+			}
+			if !slices.Contains(member.RecipientTaskIDs, taskID) {
+				member.RecipientTaskIDs = append(member.RecipientTaskIDs, taskID)
+			}
+			state.Events[id] = member
 		}
-		state.Events[eventID] = e
 		return nil
 	})
 }

@@ -5,6 +5,11 @@ agents and their existing authentication. Tasks created before this change remai
 host tasks; resume never migrates them. Missing sandbox setup fails with setup
 instructions, without falling back to host execution or a personal GitHub login.
 
+For an explicit local rollout choice, use `paddock runtime default host` while
+preparing the gateway, then `paddock runtime default openshell` to activate it.
+`paddock runtime default` prints the current choice. This affects new tasks only;
+an explicit `--runtime` flag wins, and resumes retain their saved runtime.
+
 ## Setup
 
 Qualify OpenShell **0.1.6** (CLI, gateway, and runtime images together) on a local
@@ -113,7 +118,10 @@ it with `paddock github stop` followed by `paddock github start`.
 
 With `--allow`, the host poller discovers an open PR by the task's exact repository
 and branch and registers the existing watch mechanism. Only the configured engineer
-logins can issue instructions. Without this option, register a watch explicitly
+logins can issue instructions. Use `--allow '*'` to accept any GitHub user who can
+comment, including future users; bot comments remain excluded. This sets the policy
+for newly created tasks and discovered watches, without widening existing watches.
+Without this option, register a watch explicitly
 from the host. Sandboxed agents use ordinary `gh` for PRs/replies; the host owns task
 coordination. `paddock message TASK 'instructions'` uses the agent's native inbox inside
 the sandbox, resuming the saved conversation when needed. Claude support is pinned

@@ -20,11 +20,15 @@ type fakeGitHub struct {
 	reactionCalls  int
 	failReaction   bool
 	beforeReaction func(GitHubComment)
+	userLookups    []string
 }
 
 func (f *fakeGitHub) ValidateIdentity(context.Context) error                 { return nil }
 func (f *fakeGitHub) Pull(context.Context, string, int) (PullRequest, error) { return f.pr, nil }
-func (f *fakeGitHub) UserID(context.Context, string) (int64, error)          { return 7, nil }
+func (f *fakeGitHub) UserID(_ context.Context, login string) (int64, error) {
+	f.userLookups = append(f.userLookups, login)
+	return 7, nil
+}
 func (f *fakeGitHub) Comments(context.Context, string, int) ([]GitHubComment, error) {
 	return append(append([]GitHubComment{}, f.comments...), f.replies...), nil
 }

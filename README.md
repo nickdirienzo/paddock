@@ -2,7 +2,7 @@
 
 A local control plane for coding agents. Give a task its own Git worktree and persistent terminal, inspect it later, and let an agent delegate a child task to Codex or Claude Code.
 
-New tasks run in OpenShell by default, with repository-scoped GitHub App credentials and retained workspace/conversation state. Configure the [OpenShell runtime](docs/openshell.md) first. Use `--runtime host` explicitly for host execution; existing tasks keep their original runtime.
+New tasks run in OpenShell by default, with repository-scoped GitHub App credentials and retained workspace/conversation state. Configure the [OpenShell runtime](docs/openshell.md) first. Choose `paddock runtime default host` for a persistent local host default, or `--runtime host` for one run; existing tasks keep their original runtime.
 
 ## Setup
 

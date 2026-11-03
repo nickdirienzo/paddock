@@ -24,7 +24,7 @@ const help = `Paddock — a local control plane for coding agents
   paddock show <id> [--json]
   paddock attach <id> [--client Rex-client-id]
   paddock resume <id> [--json] [--detach] [--client Rex-client-id]
-  paddock runtime show|configure|check
+  paddock runtime show|configure|check|default
   paddock gc [--apply] [--json]
   paddock lifecycle show|configure
   paddock github --help

@@ -153,3 +153,28 @@ func TestGitHubTransportPaginationIdentityAndThreading(t *testing.T) {
 		t.Fatal(reply, err)
 	}
 }
+
+func TestGitHubReviewSubmissionSnapshot(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/team/repo/pulls/1/reviews":
+			fmt.Fprint(w, `[{"id":50,"state":"CHANGES_REQUESTED","body":"Shared concern","submitted_at":"2026-11-03T19:00:00Z"},{"id":51,"state":"PENDING","body":"Unsubmitted","submitted_at":null}]`)
+		case "/repos/team/repo/pulls/1/comments":
+			fmt.Fprint(w, `[{"id":1,"pull_request_review_id":50,"body":"First"},{"id":2,"pull_request_review_id":50,"body":"Second"}]`)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	api := NewGitHubAPI(GitHubIdentity{Mode: "app", App: &GitHubAppConfig{AppID: 42, InstallationID: 99}})
+	api.app.baseURL, api.app.token, api.app.expires = server.URL, "fixture-token", time.Now().Add(time.Hour)
+	comments, err := api.Comments(context.Background(), "team/repo", 1)
+	if err != nil || len(comments) != 3 {
+		t.Fatal(comments, err)
+	}
+	if paths[0] != "/repos/team/repo/pulls/1/reviews" || comments[0].Kind != "review_submission" || comments[0].CreatedAt.IsZero() || comments[1].ReviewID != 50 || comments[2].ReviewID != 50 {
+		t.Fatal(paths, comments)
+	}
+}
