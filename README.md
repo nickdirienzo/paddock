@@ -71,8 +71,8 @@ the approved author list, and asks agents to report watch and poller readiness w
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions and publishes queued replies; offline sessions keep
-their comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
+routes comments to online sessions, resumes stopped Codex conversations when their
+identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 
 ### Repository names
@@ -191,11 +191,11 @@ No work is automatically merged, committed, pushed, or turned into a PR.
 The adapter uses commands verified against the installed Rex CLI and live local server:
 
 - `rex whoami --json` discovers the endpoint; Paddock requires a local Unix socket and persists that endpoint.
-- `rex new <name> -c <worktree> --keep-open --shell=none --json -- <command>` creates the terminal.
+- `rex new <name> -c <worktree> --shell=none --json -- <command>` creates the terminal.
 - `rex ls --json`, `rex session inspect`, and `rex block call ... process` inspect it.
 - `rex -C <client> actions --json` verifies support before `do session.select` reconnects the app.
 
-There is no assumed `rex attach` or `rex resume` command. Reconnecting selects the existing terminal; it does not restart the agent. `--keep-open` preserves a Rex pane after exit for inspection.
+There is no assumed `rex attach` or `rex resume` command. Reconnecting selects the existing terminal; it does not restart the agent. New Rex panes close when their agent process exits; the task record retains its exit status.
 
 The selected agent owns the terminal's foreground process group. Rex sees `codex` or `claude` as the foreground process for its native agent UI, while Paddock waits in the background and records the agent's exit.
 
@@ -219,7 +219,7 @@ paddock run "Implement feature X" --agent claude --terminal screen
 paddock attach <id>
 ```
 
-Screen sessions run detached from the launching CLI. Detach with **Ctrl-A, then D**; the agent keeps running. Paddock ignores personal `.screenrc` commands when creating sessions. A Screen session ends when the agent exits; task records and worktrees remain, but that terminal can no longer be attached. Rex retains exited panes instead.
+Screen sessions run detached from the launching CLI. Detach with **Ctrl-A, then D**; the agent keeps running. Paddock ignores personal `.screenrc` commands when creating sessions. A Screen session ends when the agent exits; task records and worktrees remain, but that terminal can no longer be attached. New Rex panes also close on process exit; older retained panes are closed when resuming.
 
 ## GitHub coordination
 
@@ -249,19 +249,26 @@ Each versioned JSON record contains immutable task identity, parent ID, prompt, 
 
 Every Paddock state operation uses the same short-lived OS file lock. A mutation reads the latest record while holding the lock, writes and syncs a temporary file, atomically replaces the record, and syncs its directory on Unix. Process death releases the lock; the `.lock` file itself is intentionally retained. Incomplete temporary files are ignored. Locks are never held across Git operations, terminal requests, or agent execution. Malformed records fail visibly rather than being silently dropped or overwritten.
 
-Use a local filesystem. Concurrent manual edits, network-filesystem locking semantics, and synchronization services are outside v0's contract. Read the JSON directly freely; make manual edits only while Paddock processes are stopped. There is no SQLite database, daemon, background indexer, or migration from the discarded TypeScript prototype.
+Use a local filesystem. Concurrent manual edits, network-filesystem locking semantics, and synchronization services are outside v0's contract. Read the JSON directly freely; make manual edits only while Paddock processes are stopped. There is no SQLite database, lifecycle daemon, background indexer, or migration from the discarded TypeScript prototype.
 
 ### Lifecycle and recovery
 
-A task moves through `preparing → starting → running → completed/failed`. `completed` means the agent process exited with code zero; it does not assert that the requested code change is correct. Interactive agents can remain `running` while awaiting input or after answering a prompt. Paddock does not infer model activity from terminal text.
+A task moves through `preparing → starting → running → stopped/failed`. `stopped` means the agent process exited with code zero; process exit does not mark the work complete. Older records may still say `completed`. Interactive agents can remain `running` while awaiting input or after answering a prompt. Paddock does not infer model activity from terminal text.
 
 The terminal runs `paddock __run <id>`, an internal supervisor that launches the agent with inherited terminal I/O and records its exit. Closing the original `paddock run` process does not stop it. Ordinary agent approval, authentication, and sandbox settings are preserved; Paddock does not bypass them.
 
 `tasks` and `show` reconcile terminal observations. A confirmed missing/exited terminal without a recorded agent exit becomes `interrupted`. An unreachable server is reported as `unknown` and does not erase the last known process status. Terminal metadata is stored before returning from launch; if a Rex launch reply is lost, the deterministic session name allows later recovery. A timed-out launch is never blindly retried.
 
-Git and a terminal server cannot participate in a filesystem transaction. Failed launches retain their task record, error, branch, and any created worktree. If the launching CLI dies during preparation, the record can remain `preparing`; inspect the worktree and terminal before starting a replacement task. No automatic retry, worktree deletion, or agent-conversation resume is implemented in v0.
+Git and a terminal server cannot participate in a filesystem transaction. Failed launches retain their task record, error, branch, and any created worktree. If the launching CLI dies during preparation, the record can remain `preparing`; inspect the worktree and terminal before starting a replacement task. Use `paddock resume TASK` to resume an existing native conversation. Uncertain launches are not automatically retried.
 
 Tasks survive Paddock restarts. Terminals survive CLI disconnects while their terminal server and host remain running; host reboot survival is not promised. The worktree belongs to the task, independent of whether its agent process is still alive.
+
+`paddock gc` previews workspace cleanup; `paddock gc --apply` rechecks and removes only
+expired, safe worktrees. The default retention period is seven days after activity.
+Configure it with `paddock lifecycle configure --worktree-ttl 168h`. Dirty/unpushed
+work, active processes, open PRs, pending work, and unknown check results prevent
+removal. Conversations and branch refs are retained. See [lifecycle and recovery](docs/lifecycle.md)
+for artifact policy, recovery, and the current automatic-shutdown limitation.
 
 ### Git behavior
 
@@ -306,3 +313,20 @@ Native macOS operation is tested. Linux and Windows compilation is checked separ
 ## License
 
 Copyright 2026 Paddock contributors. Licensed under the [Apache License, Version 2.0](LICENSE).
+
+### Intelligent orchestration
+
+`paddock orchestrate` runs an ephemeral, subscription-backed Codex planner against
+scoped tasks, sessions, repositories, and PR discussion. It can ignore, message an
+existing agent, delegate a child, create independent work in another repository, or
+reply. Decisions and outcomes are durable; repeated signals do not duplicate work.
+
+```sh
+paddock planner configure --model MODEL --instructions-file ./pit-wall.txt
+paddock orchestrate --id request-104 --task TASK_ID --dry-run "Investigate this request"
+```
+
+GitHub watches keep direct messaging by default. Enable planning explicitly with
+`paddock github routing PR_URL --mode planner`, adding `--tasks` and `--repos` for
+cross-task or cross-repository scope. See [orchestration](docs/orchestration.md) for
+configuration, previews, context reads, authorization, and the real-model acceptance run.

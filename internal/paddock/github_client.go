@@ -21,6 +21,8 @@ type GitHubIdentity struct {
 }
 
 type PullRequest struct {
+	Title   string `json:"title"`
+	Body    string `json:"body"`
 	Number  int    `json:"number"`
 	State   string `json:"state"`
 	HTMLURL string `json:"html_url"`

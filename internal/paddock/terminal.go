@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -125,7 +126,7 @@ func terminalFor(s Session) Terminal {
 func launchCommand(exe, home, id string) []string {
 	args := []string{"/usr/bin/env", "PADDOCK_HOME=" + home, "PATH=" + filepath.Dir(exe) + string(os.PathListSeparator) + os.Getenv("PATH")}
 	// Explicit non-secret configuration is forwarded to Rex's server environment.
-	for _, key := range []string{"PADDOCK_CODEX_BIN", "PADDOCK_CLAUDE_BIN", "PADDOCK_REX_BIN", "PADDOCK_SCREEN_BIN", "PADDOCK_MISE_BIN", "CODEX_HOME", "MISE_STATE_DIR", "MISE_CONFIG_DIR", "XDG_STATE_HOME"} {
+	for _, key := range []string{"PADDOCK_CODEX_BIN", "PADDOCK_CLAUDE_BIN", "PADDOCK_REX_BIN", "PADDOCK_SCREEN_BIN", "PADDOCK_MISE_BIN", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "MISE_STATE_DIR", "MISE_CONFIG_DIR", "XDG_STATE_HOME"} {
 		if v := os.Getenv(key); v != "" {
 			args = append(args, key+"="+v)
 		}
@@ -136,8 +137,9 @@ func launchCommand(exe, home, id string) []string {
 func (t terminal) Launch(ctx context.Context, task Task, exe, home string) (Session, error) {
 	s := task.Session
 	command := launchCommand(exe, home, task.ID)
+	command = append(command, "--generation", strconv.Itoa(s.Generation))
 	if t.backend == "rex" {
-		args := []string{"new", s.Name, "-c", task.Worktree, "--keep-open", "--shell=none", "--json", "--"}
+		args := []string{"new", s.Name, "-c", task.Worktree, "--shell=none", "--json", "--"}
 		b, err := t.rex(ctx, append(args, command...)...)
 		if err != nil {
 			return s, err

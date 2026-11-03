@@ -76,7 +76,7 @@ func githubFixture(t *testing.T) (GitHubCoordinator, *fakeGitHub, *Store, GitHub
   while IFS= read -r line; do
    case "$line" in
     *'"id":1'*) printf '%s\n' '{"id":1,"result":{}}' ;;
-    *'"id":2'*) printf '%s\n' '{"id":2,"result":{"data":[{"id":"thread-fixture","cwd":"`+task.Worktree+`"}],"nextCursor":null}}' ;;
+    *'"id":2'*) printf '%s\n' '{"id":2,"result":{"thread":{"id":"thread-fixture","cwd":"`+task.Worktree+`"},"data":[{"id":"thread-fixture","cwd":"`+task.Worktree+`"}],"nextCursor":null}}' ;;
    esac
   done ;;
  queue) printf '%s\n' "$*" >> `+quote(log)+` ;;

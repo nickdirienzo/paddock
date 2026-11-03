@@ -102,6 +102,32 @@ func TestGitHubAppReactionEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestGCOpenPullLookupUsesExactHeadAndFailsClosed(t *testing.T) {
+	status := 200
+	body := `[]`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/repos/team/repo/pulls" || r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "engineer:paddock/task" {
+			t.Errorf("unsafe PR lookup: %s %s", r.Method, r.URL)
+		}
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	defer server.Close()
+	api := NewGitHubAPI(GitHubIdentity{Mode: "app", App: &GitHubAppConfig{AppID: 42, InstallationID: 99}})
+	api.app.baseURL, api.app.token, api.app.expires = server.URL, "fixture-token", time.Now().Add(time.Hour)
+	if open, err := api.HasOpenPull(context.Background(), "team/repo", "engineer", "paddock/task"); err != nil || open {
+		t.Fatal(open, err)
+	}
+	body = `[{"number":12,"state":"open"}]`
+	if open, err := api.HasOpenPull(context.Background(), "team/repo", "engineer", "paddock/task"); err != nil || !open {
+		t.Fatal(open, err)
+	}
+	status = 403
+	if _, err := api.HasOpenPull(context.Background(), "team/repo", "engineer", "paddock/task"); err == nil {
+		t.Fatal("unknown PR status treated as clear")
+	}
+}
 func TestGitHubTransportPaginationIdentityAndThreading(t *testing.T) {
 	dir := t.TempDir()
 	wrapper := filepath.Join(dir, "gh")

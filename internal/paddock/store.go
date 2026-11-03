@@ -227,12 +227,21 @@ func (s *Store) Status(id, status, message string, from ...string) error {
 	})
 }
 func (s *Store) Claim(id string) error {
+	return s.claimGeneration(id, nil)
+}
+
+func (s *Store) claimGeneration(id string, generation *int) error {
 	return s.update(id, func(t *Task) error {
+		if generation != nil && t.Session.Generation != *generation {
+			return fmt.Errorf("stale supervisor generation")
+		}
 		if t.Status != "starting" {
 			return fmt.Errorf("task %s cannot start from %s", id, t.Status)
 		}
 		t.Status = "running"
 		t.Session.StartedAt = now()
+		t.Session.ResumeNotice = ""
+		t.LastActivityAt = now()
 		return nil
 	})
 }
@@ -240,9 +249,10 @@ func (s *Store) Finish(id string, code int, message string) error {
 	return s.update(id, func(t *Task) error {
 		t.Session.ExitCode = &code
 		t.Session.EndedAt = now()
+		t.LastActivityAt = now()
 		t.Error = message
 		if code == 0 {
-			t.Status = "completed"
+			t.Status = "stopped"
 		} else {
 			t.Status = "failed"
 		}

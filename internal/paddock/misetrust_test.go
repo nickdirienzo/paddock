@@ -132,7 +132,7 @@ func TestLiveMiseTrustReuse(t *testing.T) {
 		t.Fatalf("supervisor probe: %v %s", err, output)
 	}
 	completed, err := store.Get(probe.ID)
-	if err != nil || completed.Status != "completed" {
+	if err != nil || completed.Status != "stopped" {
 		t.Fatal("probe did not complete", err)
 	}
 	changed := newTask("changed")

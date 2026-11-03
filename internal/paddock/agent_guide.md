@@ -42,6 +42,7 @@ paddock delegate --agent codex "Describe the independent task"
 paddock show CHILD_TASK_ID --json
 paddock message TASK_ID "Follow-up instruction"
 paddock attach TASK_ID
+paddock resume TASK_ID
 ```
 
 Delegation inherits the parent from `PADDOCK_TASK_ID`. Outside a task, provide
@@ -58,7 +59,9 @@ is unavailable, report that limitation instead of falling back to terminal keyst
 
 Ordinary human-invoked `run` opens the new Rex session. `--detach`, `--json`, delegation,
 and runs from an existing task stay in the background. `attach` reopens the existing
-session without restarting its agent. If launch or delivery reports an uncertain
+session without restarting its agent. `resume` reopens a stopped native conversation
+in the same worktree. Successful process exit means stopped, not that the task is done.
+If launch or delivery reports an uncertain
 outcome, inspect the existing task before retrying; don't create duplicate work.
 
 ## Connect a pull request
@@ -110,9 +113,9 @@ paddock github stop                 # stop service; retain all watches
 ```
 
 Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
-comments for offline sessions remain pending without an eyes reaction. Once that same
-registered task is running again, polling can deliver them. The poller does not restart
-agents. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
+comments for resumable Codex tasks wake the same saved conversation and worktree.
+Tasks without a saved conversation ID remain offline, with comments pending and no
+eyes reaction; use `paddock resume TASK_ID` to recover the identity when possible. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
 or register a watch again; there is no automatic login service yet.
 
 App credentials are deliberately excluded from the coding agent's environment. If the
@@ -133,7 +136,7 @@ Do not bypass this with a personal-account comment. An identical reply is idempo
 different text creates another update. Uncertain posts are reconciled rather than
 blindly retried.
 
-Every new, nonempty comment from an approved author on a watched PR is delivered to
+With default direct routing, every new, nonempty comment from an approved author on a watched PR is delivered to
 its owning task. No mention or command prefix is required. Interpret each comment in
 context; discussion or thanks may require no work. The poller adds 👀 after confirmed
 session delivery, independently of agent reasoning. This means queued, not completed.
@@ -144,3 +147,41 @@ Codex; Claude can run ordinary tasks but cannot receive this GitHub message adap
 Paddock does not automatically commit, push, create PRs, or merge. Those actions follow
 the user's requested workflow and repository conventions; installing this skill does
 not authorize additional publication or infrastructure changes.
+
+## Orchestrate signals
+
+When the user asks Paddock to choose where work belongs, use `paddock orchestrate`
+with a stable `--id`, an optional origin `--task`, and explicitly authorized `--tasks`
+and `--repos` scope. Use `--dry-run` to inspect a model-backed decision without acting;
+`orchestrate show SOURCE ID` shows saved context, rationale, and execution outcomes.
+The planner exits; launched agents remain durable. Never retry an uncertain action
+with a new signal ID merely to get it to run again.
+
+`paddock planner configure --model MODEL --instructions-file PATH` sets registry
+planning preferences; `planner show` displays them. Per-run model/instructions flags
+are available. Planning uses the existing Codex subscription login. Do not fetch API
+keys or alter the user's coding-agent settings to make the planner work.
+
+GitHub planning is opt-in through `github routing PR_URL --mode planner`. Preserve
+existing routing and scope unless the user requests a change. The source PR does not
+necessarily own subsequent work; a validated signal can target another authorized task.
+Recipients should use the supplied reply command for that specific originating event.
+A newly launched orchestration task already has its worktree and agent: perform its
+assignment here rather than creating another task to satisfy the requested isolation.
+
+## Workspace retention
+
+Agent processes, native conversations, and worktrees have separate lifetimes.
+Do not create replacement tasks for stopped agents. Resume by task ID. If Paddock
+reports that a workspace was reconstructed, inspect Git and rebuild as needed;
+uncommitted files and build artifacts are not recoverable from conversation history.
+
+`paddock gc` previews eligibility. `paddock gc --apply` is the explicit cleanup
+operation; do not run it merely because a turn or PR finished. The default workspace
+TTL is seven days. Unknown safety checks, local changes, unpushed work, open PRs,
+active processes, and pending work retain the workspace. Ordinary status inspection
+does not renew the TTL. Native conversations and branch refs are not collected.
+
+Paddock does not yet automatically stop an interactive agent after a turn. Do not
+infer completion from terminal silence, use a raw Stop hook to kill the agent,
+or close a session that may be waiting for approval.

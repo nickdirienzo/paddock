@@ -122,7 +122,8 @@ func liveTerminalLifecycle(t *testing.T, backend string, bareAlias bool) {
 		}
 		childAgent = "codex"
 	}
-	agent := script(t, `printf '%s' "$PADDOCK_TASK_ID" > identity
+	agent := script(t, `if [ "${1:-}" = "--version" ]; then exit 1; fi
+printf '%s' "$PADDOCK_TASK_ID" > identity
 printf '%s' "$$" > agent-pid
 for argument; do prompt=$argument; done
 case "$prompt" in
@@ -211,7 +212,7 @@ exit 0
 	if e = os.WriteFile(filepath.Join(child.Worktree, "finish"), nil, 0600); e != nil {
 		t.Fatal(e)
 	}
-	waitFor(t, func() bool { v, e := s.Get(child.ID); return e == nil && v.Status == "completed" })
+	waitFor(t, func() bool { v, e := s.Get(child.ID); return e == nil && v.Status == "stopped" })
 	p, e := s.Get(parent.ID)
 	if e != nil || p.Status != "running" {
 		t.Fatal(p, e)
@@ -219,10 +220,10 @@ exit 0
 	if e = os.WriteFile(filepath.Join(parent.Worktree, "finish"), nil, 0600); e != nil {
 		t.Fatal(e)
 	}
-	waitFor(t, func() bool { v, e := s.Get(parent.ID); return e == nil && v.Status == "completed" })
+	waitFor(t, func() bool { v, e := s.Get(parent.ID); return e == nil && v.Status == "stopped" })
 	service := Service{Store: s, Executable: exe}
 	p, _, e = service.Refresh(context.Background(), p)
-	if e != nil || p.Status != "completed" {
+	if e != nil || p.Status != "stopped" {
 		t.Fatal(p, e)
 	}
 }
