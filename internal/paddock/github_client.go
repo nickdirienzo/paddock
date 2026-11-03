@@ -182,8 +182,8 @@ func (g GitHubAPI) UserID(ctx context.Context, login string) (int64, error) {
 		Type string `json:"type"`
 	}
 	err := g.request(ctx, "GET", "users/"+url.PathEscape(login), nil, &user)
-	if err == nil && (user.ID < 1 || user.Type != "User") {
-		err = fmt.Errorf("authorized engineer must be a GitHub user")
+	if err == nil && (user.ID < 1 || (user.Type != "User" && user.Type != "Bot")) {
+		err = fmt.Errorf("authorized account must be a GitHub user or bot")
 	}
 	return user.ID, err
 }

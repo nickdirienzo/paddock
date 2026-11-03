@@ -132,8 +132,9 @@ paddock github routing https://github.com/OWNER/REPO/pull/123 \
 paddock github routing https://github.com/OWNER/REPO/pull/123 --mode direct
 ```
 
-The existing author allowlist and immutable GitHub user IDs are checked before model
-invocation and again before execution. Bots and Paddock-generated comments are ignored.
+The existing author allowlist and immutable GitHub account IDs are checked before model
+invocation and again before execution. Authorized external bots can provide signals;
+Paddock's own App identity and marked comments are ignored.
 A planner-enabled watch can route to another authorized task even when its original
 agent is offline. A direct watch still waits for its owning session. Watch changes do
 not replay already-consumed comments; old uncertain deliveries are not automatically

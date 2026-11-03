@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 2 // v2 understands allow_any_user watch policies.
+const githubPollerVersion = 3 // v3 authorizes user and bot accounts while filtering Paddock's own identity.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.

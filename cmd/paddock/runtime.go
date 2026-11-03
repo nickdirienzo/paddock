@@ -23,7 +23,8 @@ New tasks default to OpenShell unless runtime default explicitly selects host.
 An explicit --runtime flag overrides the local default.
 Existing tasks keep their runtime. Configuration contains references, never secrets.
 Build the agent image and configure model providers using docs/openshell.md first.
-Use --allow '*' for any GitHub user on automatically discovered PR watches; bots remain excluded.
+Use --allow '*' for any GitHub user or bot on automatically discovered PR watches.
+Paddock's own App identity and marked replies remain excluded.
 `
 
 func runRuntime(args []string, out io.Writer) error {

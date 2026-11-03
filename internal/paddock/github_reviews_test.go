@@ -73,6 +73,32 @@ func TestSubmittedReviewDeliveredTogetherWithIndividualReplies(t *testing.T) {
 	}
 }
 
+func TestSubmittedBotReviewDeliveredTogether(t *testing.T) {
+	g, remote, s, w, log := githubFixture(t)
+	summary, members := reviewFixture()
+	for _, comment := range append([]*GitHubComment{&summary}, &members[0], &members[1]) {
+		comment.User.Login, comment.User.Type = "claude[bot]", "Bot"
+	}
+	remote.comments = append(members, summary)
+	if _, err := g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || strings.Count(string(data), "queue --thread") != 1 {
+		t.Fatalf("delivery: %s %v", data, err)
+	}
+	for _, text := range []string{summary.Body, members[0].Body, members[1].Body} {
+		if !strings.Contains(string(data), text) {
+			t.Fatalf("missing bot review context %q", text)
+		}
+	}
+	state, _ := s.GitHubState()
+	parent := state.Events[githubEventID(w, summary)]
+	if parent.Plan.Action != "message" || len(parent.ReviewMembers) != 2 {
+		t.Fatalf("bot review was not authorized: %+v", parent)
+	}
+}
+
 func TestReviewWaitsForSubmissionAndDoesNotReplayOldComments(t *testing.T) {
 	g, remote, s, w, log := githubFixture(t)
 	summary, members := reviewFixture()

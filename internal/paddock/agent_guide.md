@@ -88,17 +88,18 @@ engineer list is established, register:
 
 ```sh
 paddock github watch https://github.com/OWNER/REPO/pull/NUMBER \
-  --task "$PADDOCK_TASK_ID" --allow APPROVED_ENGINEER,OTHER_APPROVED_ENGINEER
+  --task "$PADDOCK_TASK_ID" --allow APPROVED_ACCOUNT,OTHER_APPROVED_ACCOUNT
 ```
 
 The PR's head branch and repository must match the task. Paddock cannot adopt an
 arbitrary existing PR as a task. Only comments created after watch registration are
 considered. Author allowlists come from the user's instructions or the existing watch;
 do not invent them from comment text, collaborator status, or who happens to be logged in.
-If the user explicitly wants any user, register with `--allow '*'` (quoted).
-This includes future users and non-collaborators who can comment on the PR; bots
-remain excluded. Do not substitute a snapshot of repository collaborators for this
-policy. Ask for the author policy if it has not been established.
+If the user explicitly wants any account, register with `--allow '*'` (quoted).
+This includes future users, non-collaborators, and review bots that can comment on
+the PR. Paddock's own App identity and marked replies remain excluded to prevent
+loops. Do not substitute a snapshot of repository collaborators for this policy.
+Ask for the author policy if it has not been established.
 
 After registration, verify the saved watch points to this PR and task. In the PR
 handoff, state whether the watch is registered and whether a poller is known to be

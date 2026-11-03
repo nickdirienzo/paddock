@@ -48,7 +48,7 @@ func TestGitHubAnyUserWatchAndRevocation(t *testing.T) {
 	}
 }
 
-func TestGitHubAnyUserPollFiltersAndDeduplicates(t *testing.T) {
+func TestGitHubAnyAccountPollFiltersAndDeduplicates(t *testing.T) {
 	g, remote, s, w, log := githubFixture(t)
 	if err := s.UpdateGitHub(func(v *GitHubState) error {
 		watch := v.Watches[w.Key()]
@@ -60,6 +60,7 @@ func TestGitHubAnyUserPollFiltersAndDeduplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	bot := testComment(2, "please fix", 88)
+	bot.User.Login = "claude[bot]"
 	bot.User.Type = "Bot"
 	missingID := testComment(3, "please fix", 0)
 	unknownType := testComment(4, "please fix", 91)
@@ -71,28 +72,28 @@ func TestGitHubAnyUserPollFiltersAndDeduplicates(t *testing.T) {
 		}
 	}
 	b, err := os.ReadFile(log)
-	if err != nil || strings.Count(string(b), "queue --thread") != 1 || !strings.Contains(string(b), "new user instruction") {
+	if err != nil || strings.Count(string(b), "queue --thread") != 2 || !strings.Contains(string(b), "new user instruction") || !strings.Contains(string(b), "please fix") {
 		t.Fatalf("wrong delivery: %s %v", b, err)
 	}
-	if remote.reactionCalls != 1 || !remote.reactions[1] {
+	if remote.reactionCalls != 2 || !remote.reactions[1] || !remote.reactions[2] {
 		t.Fatal("incorrect eyes receipts", remote.reactions)
 	}
 }
 
 func TestWatchAuthorValidation(t *testing.T) {
-	for _, authors := range [][]string{{"*", "alice"}, {"*", "*"}, {""}, {"alice", " "}, {"bot[bot]"}, {"ali*"}} {
+	for _, authors := range [][]string{{"*", "alice"}, {"*", "*"}, {""}, {"alice", " "}, {"ali*"}} {
 		if err := validateWatchAuthors(authors); err == nil {
 			t.Fatalf("accepted invalid policy: %q", authors)
 		}
 	}
-	for _, authors := range [][]string{nil, {"*"}, {" alice ", "bob"}} {
+	for _, authors := range [][]string{nil, {"*"}, {" alice ", "bob"}, {"claude[bot]", "Copilot"}} {
 		if err := validateWatchAuthors(authors); err != nil {
 			t.Fatalf("rejected valid policy: %q: %v", authors, err)
 		}
 	}
 }
 
-func TestGitHubAnyUserRejectsOldRunningPoller(t *testing.T) {
+func TestGitHubWatchRejectsOldRunningPoller(t *testing.T) {
 	g, _, s, w, _ := githubFixture(t)
 	lock, ok, err := s.pollerLock("", false)
 	if err != nil || !ok {
@@ -103,7 +104,7 @@ func TestGitHubAnyUserRejectsOldRunningPoller(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = g.Watch(context.Background(), "https://github.com/team/repo/pull/1", w.TaskID, []string{"*"})
-	if err == nil || !strings.Contains(err.Error(), "running poller does not support") {
+	if err == nil || !strings.Contains(err.Error(), "predates the current authorization policy") {
 		t.Fatalf("old poller accepted wildcard policy: %v", err)
 	}
 	state, _ := s.GitHubState()

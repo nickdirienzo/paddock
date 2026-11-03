@@ -51,8 +51,8 @@ No credentials or local task contents are copied into this report.
 - `TestGitHubCrashClaimNeverReplays`: crash after a durable action claim leaves an
   uncertain outcome and causes no automatic redelivery.
 - `TestGitHubUncertainReplyIsNotResent`: absent confirmation never causes blind reposting.
-- `TestGitHubPolicyAndOwnership`: bot exclusion, changed PR head ownership, planner
-  output unable to bypass author checks, exclusive polling lock.
+- `TestGitHubPolicyAndOwnership`: authorized external bot delivery, changed PR head
+  ownership, planner output unable to bypass author checks, exclusive polling lock.
 - `TestGitHubOnlyExplicitWatchesAndNoReplayOfEdits`: unwatched PRs cannot trigger work;
   editing an already-processed comment cannot replay it.
 - `TestGitHubTransportPaginationIdentityAndThreading`: both comment endpoints, multiple

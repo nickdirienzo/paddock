@@ -49,14 +49,12 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	if err = validateWatchAuthors(authors); err != nil {
 		return err
 	}
-	if len(authors) == 1 && strings.TrimSpace(authors[0]) == "*" {
-		status, err := g.Service.Store.GitHubPollerStatus()
-		if err != nil {
-			return err
-		}
-		if status.Running && status.RuntimeVersion < githubPollerVersion {
-			return fmt.Errorf("the running poller does not support --allow '*'; use the upgraded CLI to run paddock github stop then paddock github start before registering this watch")
-		}
+	status, err := g.Service.Store.GitHubPollerStatus()
+	if err != nil {
+		return err
+	}
+	if status.Running && status.RuntimeVersion < githubPollerVersion {
+		return fmt.Errorf("the running poller predates the current authorization policy; use the upgraded CLI to run paddock github stop then paddock github start before registering this watch")
 	}
 	state, err := g.Service.Store.GitHubState()
 	if err != nil {
@@ -311,9 +309,9 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 		}
 		plan := Plan{Action: "ignore", Kind: "discussion", Reason: "author is not authorized"}
 		// Identity and authorization are enforced before the planner sees the text.
-		self := comment.User.Type == "Bot" || (binding.Mode == "app" && strings.EqualFold(comment.User.Login, binding.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
+		self := paddockGeneratedGitHub(binding, comment)
 		if self {
-			plan.Reason = "bot or Paddock-generated comment"
+			plan.Reason = "Paddock-generated comment"
 		} else if authorizedGitHub(w, comment) {
 			plan = PlanRequest(Request{Body: comment.Body})
 		}

@@ -23,7 +23,7 @@ const githubHelp = `GitHub coordination:
   paddock github route <owner/repo|owner/*|*> --identity <name>
   paddock github unroute <pattern>
   paddock github identities
-  paddock github watch <PR-URL> --task <id> --allow <engineer,engineer>
+  paddock github watch <PR-URL> --task <id> --allow <account,account>
   paddock github routing <PR-URL> --mode direct|planner [--tasks id,id] [--repos alias,path] [--model MODEL]
   paddock github unwatch <PR-URL>
   paddock github start [--interval 30s]
@@ -33,7 +33,8 @@ const githubHelp = `GitHub coordination:
   paddock github reply <event-id> "reply text" [--queue]
 
 Only explicitly watched PRs and authorized authors can create work.
-Use --allow '*' to accept any GitHub user on that PR (bots remain excluded).
+Use --allow '*' to accept any GitHub user or bot on that PR.
+Paddock's own App identity and marked replies remain excluded.
 Quote '*' to prevent shell expansion. Named allowlists remain the default.
 App mode signs JWTs with a private key and refreshes installation tokens in memory.
 No token is persisted. Watch registration starts or reuses one background poller.
