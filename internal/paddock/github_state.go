@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -22,11 +23,14 @@ type GitHubWatch struct {
 	HeadRef       string              `json:"head_ref"`
 	Since         time.Time           `json:"since"`
 	Authors       map[string]int64    `json:"authors"`
+	AllowAnyUser  bool                `json:"allow_any_user,omitempty"`
 }
 
 func (w GitHubWatch) Key() string { return fmt.Sprintf("%s#%d", w.Repo, w.Number) }
 
 type GitHubEvent struct {
+	ReviewMembers    []string              `json:"review_members,omitempty"`
+	ReviewBatch      string                `json:"review_batch,omitempty"`
 	SignalKey        string                `json:"signal_key,omitempty"`
 	RecipientTaskIDs []string              `json:"recipient_task_ids,omitempty"`
 	Identity         GitHubIdentityBinding `json:"identity,omitzero"`
@@ -159,10 +163,31 @@ func authorizedGitHub(w GitHubWatch, c GitHubComment) bool {
 	if c.User.Type != "User" || c.User.ID < 1 {
 		return false
 	}
+	if w.AllowAnyUser {
+		return true
+	}
 	for _, id := range w.Authors {
 		if id == c.User.ID {
 			return true
 		}
 	}
 	return false
+}
+
+// A wildcard is an explicit watch policy, never a GitHub login or a snapshot
+// of repository collaborators. An empty runtime list disables auto-discovery.
+func validateWatchAuthors(authors []string) error {
+	for _, author := range authors {
+		login := strings.TrimSpace(author)
+		if login == "*" {
+			if len(authors) != 1 {
+				return fmt.Errorf("--allow '*' must be used alone")
+			}
+			continue
+		}
+		if !githubLogin.MatchString(login) || strings.Contains(login, "[bot]") {
+			return fmt.Errorf("--allow requires GitHub user logins or '*' for any user")
+		}
+	}
+	return nil
 }

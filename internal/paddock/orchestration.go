@@ -148,7 +148,14 @@ func (o Orchestrator) authorize(signal Signal, policy OrchestrationPolicy) error
 			return fmt.Errorf("unknown GitHub event")
 		}
 		w, ok := state.Watches[e.WatchKey]
-		if !ok || w.TaskID != signal.TaskID || e.TaskID != signal.TaskID || e.Comment.Body != signal.Body || !authorizedGitHub(w, e.Comment) || e.Comment.User.Type == "Bot" || strings.Contains(e.Comment.Body, "<!-- paddock:") {
+		body := e.Comment.Body
+		if e.Comment.Kind == "review_submission" {
+			body, err = o.GitHub.reviewBody(e)
+			if err != nil {
+				return err
+			}
+		}
+		if !ok || w.TaskID != signal.TaskID || e.TaskID != signal.TaskID || body != signal.Body || !authorizedGitHub(w, e.Comment) || e.Comment.User.Type == "Bot" || strings.Contains(e.Comment.Body, "<!-- paddock:") {
 			return fmt.Errorf("GitHub signal is no longer authorized")
 		}
 		expected := w.Orchestration

@@ -44,7 +44,19 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 		return err
 	}
 	if len(authors) == 0 {
-		return fmt.Errorf("--allow requires at least one engineer login")
+		return fmt.Errorf("--allow requires at least one user login or '*' for any user")
+	}
+	if err = validateWatchAuthors(authors); err != nil {
+		return err
+	}
+	if len(authors) == 1 && strings.TrimSpace(authors[0]) == "*" {
+		status, err := g.Service.Store.GitHubPollerStatus()
+		if err != nil {
+			return err
+		}
+		if status.Running && status.RuntimeVersion < githubPollerVersion {
+			return fmt.Errorf("the running poller does not support --allow '*'; use the upgraded CLI to run paddock github stop then paddock github start before registering this watch")
+		}
 	}
 	state, err := g.Service.Store.GitHubState()
 	if err != nil {
@@ -87,6 +99,10 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	w := GitHubWatch{Repo: repo, Number: n, TaskID: task.ID, HeadRepo: pr.Head.Repo.FullName, HeadRef: pr.Head.Ref, Since: time.Now().UTC(), Authors: map[string]int64{}}
 	for _, login := range authors {
 		login = strings.TrimSpace(login)
+		if login == "*" {
+			w.AllowAnyUser = true
+			continue
+		}
 		id, err := api.UserID(ctx, login)
 		if err != nil {
 			return err
@@ -242,17 +258,23 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 		return processed, err
 	}
 	sort.Slice(comments, func(i, j int) bool {
+		if (comments[i].Kind == "review_submission") != (comments[j].Kind == "review_submission") {
+			return comments[i].Kind == "review_submission"
+		}
 		if comments[i].CreatedAt.Equal(comments[j].CreatedAt) {
 			return comments[i].ID < comments[j].ID
 		}
 		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
 	})
 	for _, comment := range comments {
-		if comment.CreatedAt.Before(w.Since) {
+		if comment.CreatedAt.Before(w.Since) && comment.Kind != "review" {
 			continue
 		}
 		id := githubEventID(w, comment)
 		if old, exists := state.Events[id]; exists {
+			if old.ReviewBatch != "" {
+				continue
+			}
 			if old.Status == "routing" || old.Status == "pending" {
 				updated, e := g.routeSignal(ctx, w, old)
 				if e != nil {
@@ -272,6 +294,14 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 			}
 			continue
 		}
+		// Submitted review members are claimed atomically with their parent.
+		// Unknown submissions wait for the next poll; thread replies stay individual.
+		if comment.Kind == "review" && comment.ReviewID > 0 && comment.InReplyTo == 0 {
+			continue
+		}
+		if comment.CreatedAt.Before(w.Since) {
+			continue
+		}
 		plan := Plan{Action: "ignore", Kind: "discussion", Reason: "author is not authorized"}
 		// Identity and authorization are enforced before the planner sees the text.
 		self := comment.User.Type == "Bot" || (binding.Mode == "app" && strings.EqualFold(comment.User.Login, binding.Login)) || strings.Contains(comment.Body, "<!-- paddock:")
@@ -281,7 +311,13 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 			plan = PlanRequest(Request{Body: comment.Body})
 		}
 		event := GitHubEvent{Identity: binding, ID: id, WatchKey: key, TaskID: w.TaskID, Comment: comment, Plan: plan}
-		claimed, err := g.Service.Store.claimGitHub(event)
+		var claimed bool
+		if comment.Kind == "review_submission" {
+			event, claimed, err = g.claimReview(w, event, comments)
+			plan = event.Plan
+		} else {
+			claimed, err = g.Service.Store.claimGitHub(event)
+		}
 		if err != nil {
 			return processed, err
 		}
@@ -307,7 +343,10 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 			}
 		}
 		processed = append(processed, event)
-		state.Events[id] = event
+		state, err = g.Service.Store.GitHubState()
+		if err != nil {
+			return processed, err
+		}
 	}
 	return processed, nil
 }
@@ -322,6 +361,23 @@ func (g GitHubCoordinator) saveEvent(event GitHubEvent) error {
 			}
 		}
 		v.Events[event.ID] = event
+		if event.Comment.Kind == "review_submission" {
+			for _, id := range event.ReviewMembers {
+				member := v.Events[id]
+				member.Status, member.Error, member.SignalKey = event.Status, event.Error, event.SignalKey
+				member.UpdatedAt = event.UpdatedAt
+				if event.Receipt == "pending" && member.Receipt == "" {
+					member.Receipt = "pending"
+				}
+				v.Events[id] = member
+			}
+			// GitHub has no reaction endpoint for a review submission. Inline
+			// members retain independent receipts and original reply targets.
+			if event.Receipt != "" {
+				event.Receipt = "not_applicable"
+				v.Events[event.ID] = event
+			}
+		}
 		return nil
 	})
 }

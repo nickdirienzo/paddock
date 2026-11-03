@@ -65,10 +65,8 @@ func (s *Store) OpenShellConfig() (OpenShellConfig, error) {
 	return c, c.validate()
 }
 func (c OpenShellConfig) validate() error {
-	for _, login := range c.WatchAuthors {
-		if !githubLogin.MatchString(login) || strings.Contains(login, "[bot]") {
-			return fmt.Errorf("invalid watch author")
-		}
+	if err := validateWatchAuthors(c.WatchAuthors); err != nil {
+		return err
 	}
 	if c.Binary == "" || !filepath.IsAbs(c.Binary) || c.Gateway == "" || c.Workspace == "" || c.Image == "" || !filepath.IsAbs(c.Policy) {
 		return fmt.Errorf("OpenShell requires an absolute binary and policy path, gateway, workspace, and image")
@@ -637,8 +635,8 @@ func (s Service) ensureRuntimePoller(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if status.RuntimeVersion < 1 {
-		return fmt.Errorf("the running poller predates OpenShell renewal; restart it with paddock github stop then paddock github start")
+	if status.RuntimeVersion < githubPollerVersion {
+		return fmt.Errorf("the running poller predates the current runtime; restart it with paddock github stop then paddock github start")
 	}
 	return nil
 }

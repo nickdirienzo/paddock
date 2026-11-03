@@ -33,6 +33,8 @@ const githubHelp = `GitHub coordination:
   paddock github reply <event-id> "reply text" [--queue]
 
 Only explicitly watched PRs and authorized authors can create work.
+Use --allow '*' to accept any GitHub user on that PR (bots remain excluded).
+Quote '*' to prevent shell expansion. Named allowlists remain the default.
 App mode signs JWTs with a private key and refreshes installation tokens in memory.
 No token is persisted. Watch registration starts or reuses one background poller.
 Without --interval, poll runs once and exits; interval polling runs in the foreground.

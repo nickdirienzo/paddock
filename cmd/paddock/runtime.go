@@ -13,14 +13,17 @@ import (
 
 const runtimeHelp = `paddock runtime show
 paddock runtime check
+paddock runtime default [host|openshell]
 paddock runtime configure --binary /path/to/openshell --gateway NAME
   --image REPOSITORY@sha256:DIGEST --policy /path/to/policy.json
   [--workspace default] [--config-home DIR] [--state-home DIR] [--tls-dir DIR]
   [--codex-provider NAME] [--codex-account-id ID] [--claude-provider NAME] [--allow engineer1,engineer2] [--memory 24Gi] [--cpu 8]
 
-New tasks default to OpenShell. --runtime host is an explicit opt-out.
+New tasks default to OpenShell unless runtime default explicitly selects host.
+An explicit --runtime flag overrides the local default.
 Existing tasks keep their runtime. Configuration contains references, never secrets.
 Build the agent image and configure model providers using docs/openshell.md first.
+Use --allow '*' for any GitHub user on automatically discovered PR watches; bots remain excluded.
 `
 
 func runRuntime(args []string, out io.Writer) error {
@@ -36,7 +39,7 @@ func runRuntime(args []string, out io.Writer) error {
 		fmt.Fprint(out, runtimeHelp)
 		return nil
 	}
-	if len(pos) != 0 {
+	if (args[0] != "default" && len(pos) != 0) || (args[0] == "default" && len(pos) > 1) {
 		return fmt.Errorf("unexpected runtime arguments")
 	}
 	home, e := paddock.StateHome()
@@ -49,6 +52,21 @@ func runRuntime(args []string, out io.Writer) error {
 	}
 	defer s.Close()
 	switch args[0] {
+	case "default":
+		if len(flags) != 0 {
+			return fmt.Errorf("runtime default accepts only host or openshell")
+		}
+		if len(pos) == 1 {
+			if e = s.SetDefaultRuntime(pos[0]); e != nil {
+				return e
+			}
+		}
+		value, err := s.DefaultRuntime()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, value)
+		return nil
 	case "show":
 		c, e := s.OpenShellConfig()
 		if e != nil {

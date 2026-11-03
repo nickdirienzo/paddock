@@ -90,6 +90,7 @@ esac
 func TestRexMissingPaneRequiresConfirmedListing(t *testing.T) {
 	for _, tc := range []struct{ listing, state string }{
 		{`{"blocks":[]}`, "missing"},
+		{`{"blocks":[{"block_id":"block:replacement"}]}`, "unknown"},
 		{`{"blocks":[{"block_id":"block:owned"}]}`, "unknown"},
 		{`{"blocks":[{}]}`, "unknown"},
 		{`{}`, "unknown"},
