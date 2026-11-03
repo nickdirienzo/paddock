@@ -178,6 +178,10 @@ func TestOfflineWatchDoesNotBlockOthersOrReplies(t *testing.T) {
 	other := w
 	other.Repo = "aaa/offline"
 	other.TaskID = offline.ID
+	// Offline watches still fetch PR state to display merges.
+	offlinePR := remote.pr
+	offlinePR.Base.Repo.FullName = other.Repo
+	remote.prsByRepo = map[string]PullRequest{other.Repo: offlinePR}
 	if err := s.UpdateGitHub(func(v *GitHubState) error { v.Watches[other.Key()] = other; return nil }); err != nil {
 		t.Fatal(err)
 	}
