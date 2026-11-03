@@ -16,9 +16,9 @@ import (
 
 const help = `Paddock — a local control plane for coding agents
 
-  paddock run "prompt" [--agent codex|claude] [--terminal auto|rex|screen]
-                      [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
-  paddock delegate "prompt" [--parent id] [run options]
+  paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
+                           [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
+  paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
   paddock message <id> "message"
   paddock tasks [--json]
   paddock show <id> [--json]
@@ -42,7 +42,10 @@ Task IDs accept unique prefixes. State: PADDOCK_HOME or ~/.local/state/paddock.
 Rex attach selects a session in a connected Rex app. Screen attaches here.
 Run opens its Rex session automatically; --detach or --json keeps it in the background.
 --repo accepts a registered name, a working-tree path, or a bare-repository path.
+Use - to read a multiline prompt from stdin until EOF, or --prompt-file to read a file.
 `
+
+const maxPromptBytes = 1024 * 1024
 
 // Accept options before or after positional arguments, and -- for literal text.
 func parse(args []string, allowed string) (map[string]string, []string, error) {
@@ -111,6 +114,48 @@ func short(id string) string {
 	return id
 }
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func loadPrompt(command string, pos []string, promptFile string, stdin io.Reader) (string, error) {
+	if promptFile != "" && len(pos) != 0 {
+		return "", fmt.Errorf("%s accepts either a prompt argument or --prompt-file, not both", command)
+	}
+	if promptFile == "" {
+		if len(pos) != 1 {
+			return "", fmt.Errorf("%s expects a prompt argument, '-' for stdin, or --prompt-file <path>", command)
+		}
+		if pos[0] != "-" {
+			if strings.TrimSpace(pos[0]) == "" {
+				return "", fmt.Errorf("a non-empty task prompt is required")
+			}
+			return pos[0], nil
+		}
+		promptFile = "-"
+	}
+	reader := stdin
+	var file *os.File
+	if promptFile != "-" {
+		var err error
+		file, err = os.Open(promptFile)
+		if err != nil {
+			return "", fmt.Errorf("read prompt file: %w", err)
+		}
+		defer file.Close()
+		reader = file
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, maxPromptBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read task prompt: %w", err)
+	}
+	if len(data) > maxPromptBytes {
+		return "", fmt.Errorf("task prompt exceeds %d bytes", maxPromptBytes)
+	}
+	prompt := string(data)
+	if strings.TrimSpace(prompt) == "" {
+		return "", fmt.Errorf("a non-empty task prompt is required")
+	}
+	return prompt, nil
+}
+
 func printTask(w io.Writer, t paddock.Task) {
 	fmt.Fprintf(w, "Task: %s\nStatus: %s\nAgent: %s\nRepository: %s\nBase: %s (%s)\nBranch: %s\nWorktree: %s\nTerminal: %s\nSession: %s\n", t.ID, t.Status, t.Session.Agent, t.Repo, t.Base, t.BaseCommit, t.Branch, t.Worktree, t.Session.Backend, t.Session.ID)
 	fmt.Fprintln(w, "Runtime:", t.RuntimeName())
@@ -175,7 +220,7 @@ func run(args []string, out io.Writer) error {
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
-	allowed := map[string]string{"run": "agent terminal repo base runtime json detach client", "delegate": "agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
+	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime json detach client", "delegate": "prompt-file agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -188,15 +233,23 @@ func run(args []string, out io.Writer) error {
 		fmt.Fprint(out, help)
 		return nil
 	}
-	expected := 1
-	if command == "message" {
-		expected = 2
-	}
-	if command == "tasks" {
-		expected = 0
-	}
-	if len(pos) != expected {
-		return fmt.Errorf("%s expects %d argument(s); quote the task prompt; use paddock --help", command, expected)
+	prompt := ""
+	if command == "run" || command == "delegate" {
+		prompt, err = loadPrompt(command, pos, o["prompt-file"], os.Stdin)
+		if err != nil {
+			return err
+		}
+	} else {
+		expected := 1
+		if command == "message" {
+			expected = 2
+		}
+		if command == "tasks" {
+			expected = 0
+		}
+		if len(pos) != expected {
+			return fmt.Errorf("%s expects %d argument(s); use paddock --help", command, expected)
+		}
 	}
 	home, err := paddock.StateHome()
 	if err != nil {
@@ -265,7 +318,7 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: pos[0], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"]})
+		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"]})
 		if err != nil {
 			return err
 		}

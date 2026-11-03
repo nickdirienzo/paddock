@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,44 @@ func TestCLIParsing(t *testing.T) {
 	for _, args := range [][]string{{"--unknown"}, {"--agent"}, {"--agent=codex", "--agent=claude"}} {
 		if _, _, e = parse(args, "agent"); e == nil {
 			t.Fatal(args)
+		}
+	}
+}
+
+func TestLoadPrompt(t *testing.T) {
+	prompt, err := loadPrompt("run", []string{"one line"}, "", strings.NewReader("unused"))
+	if err != nil || prompt != "one line" {
+		t.Fatal(prompt, err)
+	}
+	multiline := "Goal\n\n- first\n- second\n"
+	prompt, err = loadPrompt("run", []string{"-"}, "", strings.NewReader(multiline))
+	if err != nil || prompt != multiline {
+		t.Fatal(prompt, err)
+	}
+	path := t.TempDir() + "/goal.md"
+	if err = os.WriteFile(path, []byte(multiline), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err = loadPrompt("delegate", nil, path, strings.NewReader("unused"))
+	if err != nil || prompt != multiline {
+		t.Fatal(prompt, err)
+	}
+	prompt, err = loadPrompt("run", nil, "-", strings.NewReader(multiline))
+	if err != nil || prompt != multiline {
+		t.Fatal(prompt, err)
+	}
+	for _, tc := range []struct {
+		pos  []string
+		file string
+		in   string
+	}{
+		{nil, "", ""},
+		{[]string{"prompt"}, path, ""},
+		{[]string{"-"}, "", " \n"},
+		{[]string{"-"}, "", strings.Repeat("x", maxPromptBytes+1)},
+	} {
+		if _, err = loadPrompt("run", tc.pos, tc.file, strings.NewReader(tc.in)); err == nil {
+			t.Fatalf("accepted invalid prompt source: %+v", tc)
 		}
 	}
 }

@@ -26,6 +26,8 @@ paddock tasks --json
 
 Outside a task, `paddock repo list --json` shows global aliases. A command such as
 `paddock run --repo mirage "Implement the requested change"` works from any directory.
+For a multiline goal, `paddock run --repo mirage -` reads stdin until EOF; paste the
+prompt and press Ctrl-D. `--prompt-file goal.md` reads it from a file instead.
 There is no need to install skills or add Paddock instructions to each repository.
 Run `paddock --help` and `paddock github --help` for this installed version's options.
 

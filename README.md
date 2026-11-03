@@ -29,6 +29,19 @@ paddock show <task-id>
 paddock attach <task-id>
 ```
 
+For a multiline goal, pass `-`, paste the prompt, and press Ctrl-D to send EOF:
+
+```sh
+paddock run --repo project -
+```
+
+Prompts can also be read from a file or pipeline:
+
+```sh
+paddock run --repo project --prompt-file goal.md
+pbpaste | paddock run --repo project -
+```
+
 The directory must have an existing Git commit. No repository registration is needed. Default agent: `codex`. Default terminal: use a reachable local Rex server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to choose explicitly. An explicit backend failure never silently launches another session elsewhere. Ordinary `paddock run` also selects the new session in the connected Rex app when Remote Control is enabled. Use `--detach` to leave it in the background. JSON output, delegation, and runs invoked from an existing Paddock agent stay in the background; Screen continues to launch detached.
 
 Bare repositories are supported too. Point at the bare repository itself; Paddock creates a separate task worktree from it:
@@ -149,13 +162,13 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 
 | Command | Behavior |
 | --- | --- |
-| `paddock run "prompt"` | Persist a task, create its worktree, launch the agent, and return its ID. |
+| `paddock run <prompt\|->` | Persist a task, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
 | `paddock show <id>` | Show the prompt, parent, children, repository, base commit, branch, worktree, terminal, and exit status. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
-Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `--json` for scripting. Prompts are passed as argument values, never evaluated as shell code. Use `--` before a prompt that begins with a dash.
+Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `--json` for scripting. Prompts are passed as argument values, read from stdin with `-`, or loaded with `--prompt-file <path>`; they are never evaluated as shell code. Use `--` before a prompt that begins with a dash.
 
 `run` and `delegate` accept `--agent codex|claude`, `--terminal auto|rex|screen`, `--repo <directory>`, and `--base <ref>`. Options may precede or follow the prompt.
 
