@@ -17,13 +17,14 @@ import (
 const help = `Paddock — a local control plane for coding agents
 
   paddock run "prompt" [--agent codex|claude] [--terminal auto|rex|screen]
-                      [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
+                      [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate "prompt" [--parent id] [run options]
   paddock message <id> "message"
   paddock tasks [--json]
   paddock show <id> [--json]
   paddock attach <id> [--client Rex-client-id]
   paddock resume <id> [--json] [--detach] [--client Rex-client-id]
+  paddock runtime show|configure|check
   paddock gc [--apply] [--json]
   paddock lifecycle show|configure
   paddock github --help
@@ -112,6 +113,10 @@ func short(id string) string {
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 func printTask(w io.Writer, t paddock.Task) {
 	fmt.Fprintf(w, "Task: %s\nStatus: %s\nAgent: %s\nRepository: %s\nBase: %s (%s)\nBranch: %s\nWorktree: %s\nTerminal: %s\nSession: %s\n", t.ID, t.Status, t.Session.Agent, t.Repo, t.Base, t.BaseCommit, t.Branch, t.Worktree, t.Session.Backend, t.Session.ID)
+	fmt.Fprintln(w, "Runtime:", t.RuntimeName())
+	if t.OpenShell != nil {
+		fmt.Fprintf(w, "Sandbox: %s\nGitHub identity: %s (%s)\n", t.OpenShell.Name, t.OpenShell.Identity.Login, t.OpenShell.Repository)
+	}
 	if t.ParentID != "" {
 		fmt.Fprintln(w, "Parent:", t.ParentID)
 	}
@@ -146,6 +151,9 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "runtime" {
+		return runRuntime(args[1:], out)
+	}
 	if command == "gc" {
 		return runGC(args[1:], out)
 	}
@@ -167,7 +175,7 @@ func run(args []string, out io.Writer) error {
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
-	allowed := map[string]string{"run": "agent terminal repo base json detach client", "delegate": "agent terminal repo base parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
+	allowed := map[string]string{"run": "agent terminal repo base runtime json detach client", "delegate": "agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -257,7 +265,7 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: pos[0], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"]})
+		t, err := service.Run(ctx, paddock.RunOptions{Prompt: pos[0], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"]})
 		if err != nil {
 			return err
 		}

@@ -10,25 +10,27 @@ import (
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
 type Task struct {
-	ID                 string  `json:"id"`
-	SignalID           string  `json:"signal_id,omitempty"`
-	RelatedTaskID      string  `json:"related_task_id,omitempty"`
-	ParentID           string  `json:"parent_id,omitempty"`
-	Prompt             string  `json:"prompt"`
-	Repo               string  `json:"repo"`
-	CommonDir          string  `json:"common_dir"`
-	Base               string  `json:"base"`
-	BaseCommit         string  `json:"base_commit"`
-	Branch             string  `json:"branch"`
-	Worktree           string  `json:"worktree"`
-	Status             string  `json:"status"`
-	Error              string  `json:"error,omitempty"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
-	LastActivityAt     string  `json:"last_activity_at,omitempty"`
-	WorkspaceCommit    string  `json:"workspace_commit,omitempty"`
-	WorkspaceRemovedAt string  `json:"workspace_removed_at,omitempty"`
-	Session            Session `json:"session"`
+	Runtime            string         `json:"runtime,omitempty"` // empty on legacy host tasks
+	OpenShell          *OpenShellTask `json:"openshell,omitempty"`
+	ID                 string         `json:"id"`
+	SignalID           string         `json:"signal_id,omitempty"`
+	RelatedTaskID      string         `json:"related_task_id,omitempty"`
+	ParentID           string         `json:"parent_id,omitempty"`
+	Prompt             string         `json:"prompt"`
+	Repo               string         `json:"repo"`
+	CommonDir          string         `json:"common_dir"`
+	Base               string         `json:"base"`
+	BaseCommit         string         `json:"base_commit"`
+	Branch             string         `json:"branch"`
+	Worktree           string         `json:"worktree"`
+	Status             string         `json:"status"`
+	Error              string         `json:"error,omitempty"`
+	CreatedAt          string         `json:"created_at"`
+	UpdatedAt          string         `json:"updated_at"`
+	LastActivityAt     string         `json:"last_activity_at,omitempty"`
+	WorkspaceCommit    string         `json:"workspace_commit,omitempty"`
+	WorkspaceRemovedAt string         `json:"workspace_removed_at,omitempty"`
+	Session            Session        `json:"session"`
 }
 
 type Session struct {

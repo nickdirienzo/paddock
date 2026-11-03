@@ -140,6 +140,11 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		return t, err
 	}
 	release()
+	if t.RuntimeName() == "openshell" {
+		if err = s.startTaskSandbox(ctx, &t); err != nil {
+			return t, err
+		}
+	}
 	if t.Session.ConversationID == "" {
 		if t.Session.Agent != "codex" {
 			return t, fmt.Errorf("native conversation ID was not recorded; cannot safely resume")
@@ -162,7 +167,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		return t, err
 	}
 	if restored {
-		t.WorkspaceCommit, err = git(ctx, t.Worktree, "rev-parse", "HEAD")
+		t.WorkspaceCommit, err = taskGit(ctx, t, "rev-parse", "HEAD")
 		if err != nil {
 			return t, err
 		}
@@ -214,6 +219,9 @@ func closeExitedTerminal(ctx context.Context, t Task) error {
 }
 
 func workspaceIdentity(ctx context.Context, t Task) error {
+	if t.RuntimeName() == "openshell" {
+		return sandboxWorkspaceIdentity(ctx, t)
+	}
 	root, err := git(ctx, t.Worktree, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return err
@@ -246,6 +254,9 @@ func workspaceIdentity(ctx context.Context, t Task) error {
 }
 
 func restoreWorktree(ctx context.Context, t Task) (bool, error) {
+	if t.RuntimeName() == "openshell" {
+		return restoreSandboxWorktree(ctx, t)
+	}
 	if _, err := os.Lstat(t.Worktree); err == nil {
 		return false, workspaceIdentity(ctx, t)
 	} else if !errors.Is(err, os.ErrNotExist) {

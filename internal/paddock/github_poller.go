@@ -15,15 +15,16 @@ import (
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
 type GitHubPollerStatus struct {
-	Running   bool   `json:"running"`
-	Instance  string `json:"instance,omitempty"`
-	PID       int    `json:"pid,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	Interval  string `json:"interval,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
-	LastPoll  string `json:"last_poll,omitempty"`
-	LastError string `json:"last_error,omitempty"`
-	Log       string `json:"log"`
+	RuntimeVersion int    `json:"runtime_version,omitempty"`
+	Running        bool   `json:"running"`
+	Instance       string `json:"instance,omitempty"`
+	PID            int    `json:"pid,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	Interval       string `json:"interval,omitempty"`
+	StartedAt      string `json:"started_at,omitempty"`
+	LastPoll       string `json:"last_poll,omitempty"`
+	LastError      string `json:"last_error,omitempty"`
+	Log            string `json:"log"`
 }
 
 func (s *Store) pollerFile(name string) string { return filepath.Join(s.Home, "github-poller"+name) }
@@ -220,7 +221,7 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 		mode = "foreground"
 		instance = newID()
 	}
-	status := GitHubPollerStatus{Running: true, Instance: instance, PID: os.Getpid(), Mode: mode, Interval: interval.String(), StartedAt: now(), Log: s.pollerFile(".log")}
+	status := GitHubPollerStatus{RuntimeVersion: 1, Running: true, Instance: instance, PID: os.Getpid(), Mode: mode, Interval: interval.String(), StartedAt: now(), Log: s.pollerFile(".log")}
 	if err = writeJSONAtomic(s.pollerFile(".json"), status); err != nil {
 		return err
 	}
@@ -245,7 +246,21 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 			}
 		}
 	}()
-	defer func() { cancel(); <-stopped }()
+	renewed := make(chan struct{})
+	go func() {
+		defer close(renewed)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			_ = g.Service.RefreshSandboxCredentials(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	defer func() { cancel(); <-stopped; <-renewed }()
 	for ctx.Err() == nil {
 		// Bound a pass so a stalled API cannot prevent later polls forever.
 		pollCtx, pollCancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -284,7 +299,7 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 	if err != nil {
 		return "missing"
 	}
-	if task.Session.Agent != "codex" {
+	if !nativeMessageSupported(task) {
 		return "unsupported"
 	}
 	if task.Status != "running" {

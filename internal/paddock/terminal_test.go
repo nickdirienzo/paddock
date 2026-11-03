@@ -86,3 +86,28 @@ esac
 		t.Fatal(string(b))
 	}
 }
+
+func TestRexMissingPaneRequiresConfirmedListing(t *testing.T) {
+	for _, tc := range []struct{ listing, state string }{
+		{`{"blocks":[]}`, "missing"},
+		{`{"blocks":[{"block_id":"block:owned"}]}`, "unknown"},
+		{`{"blocks":[{}]}`, "unknown"},
+		{`{}`, "unknown"},
+		{`invalid`, "unknown"},
+	} {
+		v := taskFixture()
+		v.Session.Backend = "rex"
+		v.Session.ID = "session:real"
+		v.Session.BlockID = "block:owned"
+		v.Session.TerminalPath = script(t, `case "$*" in
+ *'block ls '*) printf '%s' '`+tc.listing+`' ;;
+ *'ls --json') printf '%s' '{"sessions":[{"session_id":"session:real"}]}' ;;
+ *) exit 1 ;;
+esac
+`)
+		_, obs := terminalFor(v.Session).Inspect(context.Background(), v)
+		if obs.State != tc.state {
+			t.Fatalf("listing %s: got %+v", tc.listing, obs)
+		}
+	}
+}

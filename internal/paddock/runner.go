@@ -22,8 +22,20 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 		"For such a child, run: PADDOCK_HOME=" + quote(home) + " " + quote(exe) + " delegate --parent " + t.ID + " --agent codex \"Describe the child task\". " +
 		"Use --agent claude for Claude Code. Children start from the repository default branch; pass --base " + t.Branch + " to include committed parent work. Use paddock show to inspect children. " +
 		"Communicate with existing Paddock agents through paddock message; never use terminal typing or simulated Enter as agent messaging."
+	if t.RuntimeName() == "openshell" {
+		prompt = t.Prompt + "\n\nPaddock task " + t.ID + ". This agent runs inside OpenShell. Work in " + t.Worktree + ". Use ordinary git and gh; GitHub requests authenticate as " + t.OpenShell.Identity.Login + " and are restricted to " + t.OpenShell.Repository + ". Keep work on branch " + t.Branch + ". Prefer native subagents for short reviews. The host owns lifecycle and PR watches; do not create nested Paddock tasks or try to access host credentials."
+	}
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
 	args := []string{}
+	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {
+		// OpenShell is the isolation boundary; nested Bubblewrap cannot create
+		// namespaces here. Keep native approval decisions enabled.
+		args = append(args, "--remote", "unix:///home/sandbox/.codex/app-server-control/app-server-control.sock")
+		// Remote resume restores the saved permissions and rejects overrides.
+		if !t.Session.Resume {
+			args = append(args, "--sandbox", "danger-full-access", "--ask-for-approval", "on-request")
+		}
+	}
 	if t.Session.Agent == "codex" && t.Session.TrustProject {
 		// An inline TOML table preserves dots and quotes in the path. Codex's
 		// CLI dotted-key parser does not parse quoted path components.
@@ -50,6 +62,18 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 			args = append(args, "--session-id", t.Session.ConversationID)
 		}
 		args = append(args, "--", prompt)
+	}
+	if t.RuntimeName() == "openshell" {
+		remote := append([]string{"/usr/local/bin/paddock-agent", fmt.Sprint(t.Session.Generation), t.Session.AgentPath}, args...)
+		c := sandboxExec(context.Background(), t, true, remote...)
+		// The content-addressed transport copy has the agent's process name
+		// so Rex can select native agent presentation through the wrapper.
+		if t.OpenShell.AgentProxy != "" {
+			c.Path = t.OpenShell.AgentProxy
+		}
+		c.Args[0] = t.Session.Agent
+		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return c
 	}
 	c := exec.Command(t.Session.AgentPath, args...)
 	c.Dir = t.Worktree
@@ -86,17 +110,21 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	miseCtx, miseCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	_, miseErr := (Service{Store: store}).ReuseMiseTrust(miseCtx, t)
-	miseCancel()
-	if miseErr != nil {
-		fmt.Fprintln(os.Stderr, "Could not reuse mise trust; mise may ask for approval:", miseErr)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	hookTrust, hookErr := codexHookTrust(ctx, t)
-	cancel()
-	if hookErr != nil {
-		fmt.Fprintln(os.Stderr, "Could not reuse Codex hook approvals; review hooks in Codex:", hookErr)
+	hookTrust := ""
+	if t.RuntimeName() == "host" {
+		miseCtx, miseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, miseErr := (Service{Store: store}).ReuseMiseTrust(miseCtx, t)
+		miseCancel()
+		if miseErr != nil {
+			fmt.Fprintln(os.Stderr, "Could not reuse mise trust; mise may ask for approval:", miseErr)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		var hookErr error
+		hookTrust, hookErr = codexHookTrust(ctx, t)
+		cancel()
+		if hookErr != nil {
+			fmt.Fprintln(os.Stderr, "Could not reuse Codex hook approvals; review hooks in Codex:", hookErr)
+		}
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
 	signals := make(chan os.Signal, 4)
@@ -148,6 +176,25 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	}
 	if restoreErr := restore(); restoreErr != nil {
 		fmt.Fprintln(os.Stderr, "could not restore terminal foreground:", restoreErr)
+	}
+	if t.RuntimeName() == "openshell" {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		// A disconnected transport does not prove that the remote agent exited.
+		if current, getErr := store.Get(t.ID); getErr == nil {
+			t = current
+		}
+		release, leaseErr := store.taskLease(t.ID, "operation")
+		if leaseErr != nil {
+			message += "; task operation still active; sandbox retained"
+			code = 1
+		} else {
+			if e := stopCompletedSandbox(ctx, t); e != nil {
+				message += "; " + e.Error()
+				code = 1
+			}
+			release()
+		}
+		cancel()
 	}
 	if err = store.Finish(t.ID, code, message); err != nil {
 		fmt.Fprintln(os.Stderr, "could not record task exit:", err)

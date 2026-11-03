@@ -1,0 +1,74 @@
+#!/usr/bin/python3
+"""Deliver to the qualified Claude 2.1.286 native inbox, respecting admission.
+
+Never turn a failed/uncertain write into a retry. The persisted native queue
+record is evidence of admission, not evidence of turn completion.
+"""
+import json
+import pathlib
+import socket
+import struct
+import sys
+import time
+import uuid
+
+
+def deliver(root, conversation, generation, body, timeout=15, home='/home/sandbox/.claude'):
+    root = pathlib.Path(root)
+    connection = socket.socket(socket.AF_UNIX)
+    connection.settimeout(timeout)
+    try:
+        state = json.loads((root / 'claude-process.json').read_text())
+        if state['conversation'] != conversation or state['generation'] != generation:
+            connection.close()
+            return 'offline'
+        connection.connect(str(root / 'claude.sock'))
+        pid, _, uid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if pid != state['pid'] or uid != (root / 'claude-process.json').stat().st_uid:
+            connection.close()
+            return 'offline'
+        histories = list(pathlib.Path(home).glob('projects/*/' + conversation + '.jsonl'))
+        if len(histories) != 1:
+            connection.close()
+            return 'offline'
+        log = open(histories[0])
+        log.seek(0, 2)
+    except (OSError, ValueError, KeyError):
+        connection.close()
+        return 'offline'  # No bytes sent; safe to retry startup races.
+    receipt = 'Paddock delivery ' + str(uuid.uuid4())
+    frame = {'type': 'user', 'uuid': str(uuid.uuid4()), 'msg_id': str(uuid.uuid4()),
+             'from': 'paddock', 'priority': 'next',
+             'message': {'role': 'user', 'content': receipt + '\n' + body}}
+    try:
+        connection.sendall((json.dumps(frame) + '\n').encode())
+        connection.shutdown(socket.SHUT_WR)
+        deadline = time.monotonic() + timeout
+        pending = ''
+        while time.monotonic() < deadline:
+            pending += log.read()
+            lines = pending.split('\n')
+            pending = lines.pop()
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if (event.get('type') == 'queue-operation' and event.get('operation') == 'enqueue'
+                        and event.get('sessionId') == conversation
+                        and event.get('content') == frame['message']['content']):
+                    return 'queued'
+            time.sleep(0.05)
+        return 'uncertain'
+    except OSError:
+        return 'uncertain'
+    finally:
+        connection.close()
+        log.close()
+
+
+if __name__ == '__main__':
+    body = json.load(sys.stdin)['message']
+    if not isinstance(body, str) or not body.strip() or len(body.encode()) > 512000:
+        sys.exit('Invalid message')
+    print(deliver('/sandbox', sys.argv[1], int(sys.argv[2]), body))

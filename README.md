@@ -2,11 +2,11 @@
 
 A local control plane for coding agents. Give a task its own Git worktree and persistent terminal, inspect it later, and let an agent delegate a child task to Codex or Claude Code.
 
-Paddock v0 runs on the host. It uses your installed agent CLIs and their existing login/subscription. It makes no direct model API calls and requires no hosted service.
+New tasks run in OpenShell by default, with repository-scoped GitHub App credentials and retained workspace/conversation state. Configure the [OpenShell runtime](docs/openshell.md) first. Use `--runtime host` explicitly for host execution; existing tasks keep their original runtime.
 
 ## Setup
 
-Requirements: Git, a logged-in `codex` or `claude`, and either a running local Rex server or GNU Screen. macOS is the tested development platform; the terminal adapters also target Unix environments. Native Windows terminal execution is not implemented (use WSL). Building a Windows binary alone does not provide Windows terminal support.
+Requirements: Git, a configured OpenShell gateway/agent image/model provider and mapped GitHub App, and either a running local Rex server or GNU Screen. Host mode instead uses a logged-in local `codex` or `claude`. macOS is the tested development platform; the terminal adapters also target Unix environments. Native Windows terminal execution is not implemented (use WSL). Building a Windows binary alone does not provide Windows terminal support.
 
 Development tooling is pinned with [mise](https://mise.jdx.dev/):
 
@@ -60,18 +60,20 @@ that binary updates the guide too. Re-run setup if the executable moves. Start a
 agent session if an existing session has not discovered the new skill. You can also
 request `$paddock` in Codex or `/paddock` in Claude Code explicitly.
 
-Every Paddock-launched task receives its task ID, registry environment, and a direct
+Host tasks receive their task ID, registry environment, and a direct
 command to read this same guide. That startup reference also works without global skill
 discovery. Setup creates no hooks and changes no agent approval settings. It updates
 only Paddock-managed skill files, refuses conflicting unmanaged files or symlinks, and
 removal preserves other files in the skill directory.
+
+Sandboxed tasks receive runtime-specific instructions to use ordinary `git` and `gh`. The host poller discovers their PRs when runtime `--allow` authors are configured; the host registry and credentials are not exposed inside the sandbox.
 
 The guide makes watch registration part of creating a PR for a Paddock task, using
 the approved author list, and asks agents to report watch and poller readiness when
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions, resumes stopped Codex conversations when their
+routes comments to online sessions, resumes stopped Codex and OpenShell Claude conversations when their
 identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 
@@ -274,9 +276,9 @@ for artifact policy, recovery, and the current automatic-shutdown limitation.
 
 Repository identity uses Git's common directory, including when launched from a linked worktree, bare repository, or subdirectory. Base selection uses locally available refs in this order: `origin/HEAD`, `origin/main`, `origin/master`, configured `init.defaultBranch`, `main`, `master`. For other layouts, specify `--base`. Paddock does not fetch automatically: run `git fetch` yourself when you want fresher remote refs. The resolved commit is recorded before worktree creation.
 
-Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. Git necessarily adds worktree metadata and a new branch to the shared repository. Post-checkout hooks are disabled for worktree creation. This is isolation of working directories, not a security sandbox.
+Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. OpenShell tasks use a private Git database inside their retained sandbox. Explicit host tasks share the original Git database and provide working-directory isolation only. Post-checkout hooks are disabled for worktree creation.
 
-Worktrees and records are kept until you remove them deliberately. Once an agent has stopped and you have preserved its changes, use Git's normal `worktree remove` and branch-management commands. Keeping its JSON record preserves the history.
+Worktrees stay warm until explicit `paddock gc --apply` passes the retention and safety checks. Task JSON records refer to native conversation history; the JSON alone is not a conversation or filesystem backup.
 
 ## Architecture and language choice
 
@@ -284,7 +286,7 @@ The project uses Go, pinned through mise. `cmd/paddock` handles CLI parsing/outp
 
 Go fits the current control plane: small CLI, JSON state, subprocess coordination, and straightforward binary distribution. Rust is also suitable, especially if Paddock eventually implements isolation primitives itself. Zig offers strong C integration and cross-compilation, but those strengths do not offset its additional implementation work for this milestone. The earlier SQLite preference was replaced with files and serialized updates.
 
-Future OpenShell or OrbStack VM execution can change the launch boundary (executable, arguments, working directory, environment) without changing task ownership. Neither integration is implemented here; there is no speculative sandbox framework or intelligent model router.
+OpenShell owns sandbox isolation and credential substitution. Paddock owns task identity, native conversation references, terminal attachment, conservative collection, and GitHub routing. OrbStack can supply the Docker VM underneath the OpenShell gateway.
 
 ## Development and tests
 

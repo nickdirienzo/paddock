@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -21,7 +20,7 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("message cannot be empty")
 	}
-	if task.Session.Agent != "codex" {
+	if !nativeMessageSupported(task) {
 		return "", fmt.Errorf("native message delivery is not available for %s", task.Session.Agent)
 	}
 	release, err := s.Store.taskLease(task.ID, "operation")
@@ -50,6 +49,9 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 			return "", fmt.Errorf("%w: agent has not started yet", ErrAgentOffline)
 		}
 	}
+	if task.Session.Agent == "claude" {
+		return s.messageClaude(ctx, task, body)
+	}
 	thread, err := codexTaskThread(ctx, task)
 	if err != nil {
 		return "", err
@@ -59,13 +61,26 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, task.Session.AgentPath, "queue", "--thread", thread, "--message", body)
-	command.Env = agentControlEnv(task)
+	if task.RuntimeName() == "openshell" {
+		if _, err = sandboxOutput(ctx, task, "/usr/local/bin/paddock-codex-state", "owner", thread); err != nil {
+			return "", fmt.Errorf("%w: native owner not ready", ErrAgentOffline)
+		}
+	}
+	queueArgs := []string{"queue", "--thread", thread, "--message", body}
+	if task.RuntimeName() == "openshell" {
+		queueArgs = append(queueArgs, "--remote", "unix:///home/sandbox/.codex/app-server-control/app-server-control.sock")
+	}
+	command := agentCommandContext(ctx, task, queueArgs...)
 	if err = s.Store.TouchActivity(task.ID); err != nil {
 		return "", err
 	}
 	if _, err = command.Output(); err != nil {
 		return thread, fmt.Errorf("Codex queue delivery outcome uncertain: %w; inspect the session before retrying", err)
+	}
+	if task.RuntimeName() == "openshell" {
+		if _, err = sandboxOutput(ctx, task, "/usr/local/bin/paddock-codex-state", "start-queued", thread); err != nil {
+			return thread, fmt.Errorf("message queued, but native turn start is unconfirmed; inspect before retrying: %w", err)
+		}
 	}
 	return thread, nil
 }
@@ -93,8 +108,7 @@ func agentControlEnv(task Task) []string {
 func codexTaskThread(ctx context.Context, task Task) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, task.Session.AgentPath, "app-server", "--stdio")
-	command.Env = agentControlEnv(task)
+	command := agentCommandContext(ctx, task, "app-server", "--stdio")
 	input, err := command.StdinPipe()
 	if err != nil {
 		return "", err
@@ -167,7 +181,11 @@ func codexTaskThread(ctx context.Context, task Task) (string, error) {
 		} `json:"data"`
 		NextCursor *string `json:"nextCursor"`
 	}
-	if err = call(2, "thread/list", map[string]any{"cwd": cwd, "limit": 100, "archived": false, "sourceKinds": []string{"cli"}, "modelProviders": []string{}}, &response); err != nil {
+	sources := []string{"cli"}
+	if task.RuntimeName() == "openshell" {
+		sources = append(sources, "appServer", "vscode")
+	}
+	if err = call(2, "thread/list", map[string]any{"cwd": cwd, "limit": 100, "archived": false, "sourceKinds": sources, "modelProviders": []string{}}, &response); err != nil {
 		return "", err
 	}
 	if response.NextCursor != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -22,6 +21,10 @@ func verifyConversation(ctx context.Context, t Task) error {
 		_, err := codexTaskThread(ctx, t)
 		return err
 	case "claude":
+		if t.RuntimeName() == "openshell" {
+			_, err := sandboxOutput(ctx, t, "python3", "-c", "import glob,os,sys; sys.exit(0 if any(os.path.getsize(p)>0 for p in glob.glob(sys.argv[1]+'/projects/*/'+sys.argv[2]+'.jsonl')) else 1)", t.Session.AgentHome, t.Session.ConversationID)
+			return err
+		}
 		// Claude's persisted native project transcripts live outside the worktree.
 		// Never use --continue or --fork-session, which can select a different ID.
 		paths, err := filepath.Glob(filepath.Join(t.Session.AgentHome, "projects", "*", t.Session.ConversationID+".jsonl"))
@@ -46,8 +49,7 @@ func captureConversation(ctx context.Context, store *Store, t Task) {
 		return
 	}
 	versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	cmd := exec.CommandContext(versionCtx, t.Session.AgentPath, "--version")
-	cmd.Dir, cmd.Env = t.Worktree, agentControlEnv(t)
+	cmd := agentCommandContext(versionCtx, t, "--version")
 	b, err := cmd.Output()
 	cancel()
 	if err != nil || !strings.HasPrefix(string(b), "codex-cli ") {

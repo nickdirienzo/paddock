@@ -1,0 +1,74 @@
+#!/usr/bin/python3
+"""Read the live native owner, not a separate metadata-only app-server."""
+import json
+import os
+import socket
+import sys
+import websocket
+
+try:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(10)
+    sock.connect(os.path.join(os.environ['CODEX_HOME'], 'app-server-control/app-server-control.sock'))
+    ws = websocket.create_connection('ws://localhost/', socket=sock, timeout=10, suppress_origin=True)
+    sequence = 0
+    def call(method, params):
+        global sequence
+        sequence += 1
+        ws.send(json.dumps({'id': sequence, 'method': method, 'params': params}))
+        for _ in range(10000):
+            message = json.loads(ws.recv())
+            if message.get('id') == sequence:
+                if 'error' in message:
+                    raise RuntimeError('native RPC failed')
+                return message['result']
+        raise RuntimeError('native RPC did not respond')
+    call('initialize', {'clientInfo': {'name': 'paddock', 'version': '0.1.0'}, 'capabilities': {'experimentalApi': True}})
+    ws.send(json.dumps({'method': 'initialized'}))
+    if sys.argv[1] == 'resume':
+        # Load the saved thread on the server before the remote TUI attaches.
+        # Codex 0.159.2's remote cold resume otherwise selects read-only.
+        status = call('thread/read', {'threadId': sys.argv[2], 'includeTurns': False})['thread']['status']['type']
+        if status not in ('idle', 'notLoaded'):
+            raise RuntimeError('native thread is active or awaiting approval')
+        result = call('thread/resume', {'threadId': sys.argv[2], 'excludeTurns': True,
+                      'sandbox': 'danger-full-access', 'approvalPolicy': 'on-request'})
+        if result['sandbox']['type'] != 'dangerFullAccess' or result['approvalPolicy'] != 'on-request':
+            raise RuntimeError('native owner did not accept outer sandbox policy')
+        print(json.dumps({'resumed': True}))
+    elif sys.argv[1] in ('owner', 'start-queued'):
+        thread = sys.argv[2]
+        status = call('thread/read', {'threadId': thread, 'includeTurns': False})['thread']['status']['type']
+        if status not in ('idle', 'active'):
+            raise RuntimeError('conversation is not loaded in native owner')
+        if sys.argv[1] == 'start-queued' and status == 'idle':
+            queue = call('thread/queue/list', {'threadId': thread, 'limit': 1})
+            if queue.get('data'):
+                call('thread/queue/start', {'threadId': thread})
+        print(json.dumps({'owner': True, 'status': status}))
+    elif sys.argv[1] == 'idle':
+        loaded = call('thread/loaded/list', {'limit': 100})
+        if loaded.get('nextCursor'):
+            raise RuntimeError('too many loaded threads to confirm idle')
+        threads = set(loaded['data'])
+        if len(sys.argv) > 2 and sys.argv[2]:
+            threads.add(sys.argv[2])
+        for thread in threads:
+            metadata = call('thread/read', {'threadId': thread, 'includeTurns': False})['thread']
+            status = metadata['status']['type']
+            if status not in ('idle', 'notLoaded'):
+                raise RuntimeError('native thread is active or awaiting approval')
+            # Native ephemeral helper threads cannot have queued submissions.
+            # They still must be idle before the sandbox may stop.
+            if metadata.get('ephemeral') is True:
+                continue
+            queue = call('thread/queue/list', {'threadId': thread, 'limit': 1})
+            if queue.get('data') or queue.get('nextCursor'):
+                raise RuntimeError('native thread has queued work')
+        print(json.dumps({'idle': True}))
+    else:
+        raise RuntimeError('unknown operation')
+    ws.close()
+except Exception:
+    # Do not expose server messages, headers, prompts, or credentials.
+    sys.exit('Native Codex state is active, unavailable, or unconfirmed; retaining sandbox.')

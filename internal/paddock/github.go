@@ -50,7 +50,11 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	if err != nil {
 		return err
 	}
-	api, _, err := g.remoteFor(state, repo, nil)
+	var pinned *GitHubIdentityBinding
+	if task.OpenShell != nil {
+		pinned = &task.OpenShell.Identity
+	}
+	api, _, err := g.remoteFor(state, repo, pinned)
 	if err != nil {
 		return err
 	}
@@ -64,7 +68,12 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	if pr.State != "open" || !strings.EqualFold(pr.Base.Repo.FullName, repo) || pr.Head.Ref != task.Branch {
 		return fmt.Errorf("open PR head branch must match the owning task branch %s", task.Branch)
 	}
-	remote, err := git(ctx, task.Worktree, "remote", "get-url", "origin")
+	var remote string
+	if task.RuntimeName() == "openshell" {
+		remote = task.OpenShell.Repository
+	} else {
+		remote, err = taskGit(ctx, task, "remote", "get-url", "origin")
+	}
 	if err != nil {
 		return err
 	}
@@ -123,6 +132,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 		return nil, err
 	}
 	defer release()
+	discoveryErr := g.discoverSandboxPulls(ctx)
 	state, err := g.Service.Store.GitHubState()
 	if err != nil {
 		return nil, err
@@ -134,6 +144,9 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 	sort.Strings(keys)
 	processed := []GitHubEvent{}
 	var watchErrors []error
+	if discoveryErr != nil {
+		watchErrors = append(watchErrors, discoveryErr)
+	}
 	for _, key := range keys {
 		events, err := g.pollWatch(ctx, state, key)
 		processed = append(processed, events...)
