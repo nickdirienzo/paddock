@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -22,7 +23,12 @@ const help = `Paddock — a local control plane for coding agents
   paddock tasks [--json]
   paddock show <id> [--json]
   paddock attach <id> [--client Rex-client-id]
+  paddock resume <id> [--json] [--detach] [--client Rex-client-id]
+  paddock gc [--apply] [--json]
+  paddock lifecycle show|configure
   paddock github --help
+  paddock orchestrate --help
+  paddock planner configure|show|reset
   paddock skill setup|status|remove|show
   paddock repo add <name> <path>
   paddock repo list [--json]
@@ -70,7 +76,7 @@ func parse(args []string, allowed string) (map[string]string, []string, error) {
 		if _, ok := opts[key]; ok {
 			return nil, nil, fmt.Errorf("duplicate option --%s", key)
 		}
-		if key == "json" || key == "queue" || key == "detach" {
+		if key == "json" || key == "queue" || key == "detach" || key == "dry-run" || key == "apply" {
 			if has {
 				return nil, nil, fmt.Errorf("--%s takes no value", key)
 			}
@@ -112,6 +118,15 @@ func printTask(w io.Writer, t paddock.Task) {
 	if t.Session.BlockID != "" {
 		fmt.Fprintln(w, "Block:", t.Session.BlockID)
 	}
+	if t.Session.ConversationID != "" {
+		fmt.Fprintln(w, "Conversation:", t.Session.ConversationID)
+	}
+	if t.LastActivityAt != "" {
+		fmt.Fprintln(w, "Last activity:", t.LastActivityAt)
+	}
+	if t.WorkspaceRemovedAt != "" {
+		fmt.Fprintln(w, "Workspace GC checkpoint:", t.WorkspaceCommit)
+	}
 	if t.Session.ExitCode != nil {
 		fmt.Fprintln(w, "Exit code:", *t.Session.ExitCode)
 	}
@@ -131,6 +146,18 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "gc" {
+		return runGC(args[1:], out)
+	}
+	if command == "lifecycle" {
+		return runLifecycle(args[1:], out)
+	}
+	if command == "orchestrate" {
+		return runOrchestrate(args[1:], out)
+	}
+	if command == "planner" {
+		return runPlanner(args[1:], out)
+	}
 	if command == "skill" {
 		return runSkill(args[1:], out)
 	}
@@ -140,7 +167,7 @@ func run(args []string, out io.Writer) error {
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
-	allowed := map[string]string{"run": "agent terminal repo base json detach client", "delegate": "agent terminal repo base parent json", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": ""}
+	allowed := map[string]string{"run": "agent terminal repo base json detach client", "delegate": "agent terminal repo base parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -204,11 +231,24 @@ func run(args []string, out io.Writer) error {
 	service := paddock.Service{Store: store, Executable: exe}
 	ctx := context.Background()
 	if command == "__run" {
-		code := paddock.RunAgent(store, pos[0], exe)
+		generation := 0
+		if o["generation"] != "" {
+			generation, err = strconv.Atoi(o["generation"])
+			if err != nil || generation < 0 {
+				return fmt.Errorf("invalid supervisor generation")
+			}
+		}
+		code := paddock.RunAgentGeneration(store, pos[0], exe, generation)
 		store.Close()
 		os.Exit(code)
 	}
 	switch command {
+	case "resume":
+		t, err := service.Resume(ctx, pos[0])
+		if err != nil {
+			return err
+		}
+		return presentLaunchedTask(ctx, "run", t, o, out, os.Stderr, service.Attach)
 	case "run", "delegate":
 		parent := o["parent"]
 		if command == "delegate" && parent == "" {

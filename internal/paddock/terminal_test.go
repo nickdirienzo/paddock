@@ -39,7 +39,7 @@ func TestConfirmedMissingAndCompletedStates(t *testing.T) {
 	}
 	// An inspector holding an old snapshot must not overwrite a recorded exit.
 	got, _, e = service.Refresh(context.Background(), v)
-	if e != nil || got.Status != "completed" {
+	if e != nil || got.Status != "stopped" {
 		t.Fatal(got, e)
 	}
 }

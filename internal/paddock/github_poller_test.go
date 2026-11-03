@@ -153,8 +153,13 @@ func TestPollExitBetweenCheckAndMessage(t *testing.T) {
 		t.Fatalf("exit race: %+v %v", events, err)
 	}
 	state, _ := s.GitHubState()
-	if len(state.Events) != 0 || remote.reactionCalls != 0 {
-		t.Fatal("unattempted claim retained")
+	event := state.Events[githubEventID(w, remote.comments[0])]
+	if event.Status != "pending" || remote.reactionCalls != 0 {
+		t.Fatal("offline action must remain pending without acknowledgement")
+	}
+	record, err := s.SignalRecord("github", event.ID)
+	if err != nil || record.Status != "pending" {
+		t.Fatalf("unattempted action not retryable: %+v %v", record, err)
 	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
 		t.Fatal("message attempted")

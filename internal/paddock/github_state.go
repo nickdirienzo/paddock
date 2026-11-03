@@ -12,30 +12,35 @@ import (
 )
 
 type GitHubWatch struct {
-	Repo     string           `json:"repo"`
-	Number   int              `json:"number"`
-	TaskID   string           `json:"task_id"`
-	HeadRepo string           `json:"head_repo"`
-	HeadRef  string           `json:"head_ref"`
-	Since    time.Time        `json:"since"`
-	Authors  map[string]int64 `json:"authors"`
+	PlannerModel  string              `json:"planner_model,omitempty"`
+	Routing       string              `json:"routing,omitempty"`
+	Orchestration OrchestrationPolicy `json:"orchestration,omitzero"`
+	Repo          string              `json:"repo"`
+	Number        int                 `json:"number"`
+	TaskID        string              `json:"task_id"`
+	HeadRepo      string              `json:"head_repo"`
+	HeadRef       string              `json:"head_ref"`
+	Since         time.Time           `json:"since"`
+	Authors       map[string]int64    `json:"authors"`
 }
 
 func (w GitHubWatch) Key() string { return fmt.Sprintf("%s#%d", w.Repo, w.Number) }
 
 type GitHubEvent struct {
-	Identity     GitHubIdentityBinding `json:"identity,omitzero"`
-	ID           string                `json:"id"`
-	WatchKey     string                `json:"watch_key"`
-	TaskID       string                `json:"task_id"`
-	Comment      GitHubComment         `json:"comment"`
-	Plan         Plan                  `json:"plan"`
-	Status       string                `json:"status"`
-	Result       string                `json:"result,omitempty"`
-	Error        string                `json:"error,omitempty"`
-	Receipt      string                `json:"receipt,omitempty"`
-	ReceiptError string                `json:"receipt_error,omitempty"`
-	UpdatedAt    string                `json:"updated_at"`
+	SignalKey        string                `json:"signal_key,omitempty"`
+	RecipientTaskIDs []string              `json:"recipient_task_ids,omitempty"`
+	Identity         GitHubIdentityBinding `json:"identity,omitzero"`
+	ID               string                `json:"id"`
+	WatchKey         string                `json:"watch_key"`
+	TaskID           string                `json:"task_id"`
+	Comment          GitHubComment         `json:"comment"`
+	Plan             Plan                  `json:"plan"`
+	Status           string                `json:"status"`
+	Result           string                `json:"result,omitempty"`
+	Error            string                `json:"error,omitempty"`
+	Receipt          string                `json:"receipt,omitempty"`
+	ReceiptError     string                `json:"receipt_error,omitempty"`
+	UpdatedAt        string                `json:"updated_at"`
 }
 
 type GitHubPost struct {

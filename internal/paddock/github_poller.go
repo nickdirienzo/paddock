@@ -248,7 +248,7 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 	defer func() { cancel(); <-stopped }()
 	for ctx.Err() == nil {
 		// Bound a pass so a stalled API cannot prevent later polls forever.
-		pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Minute)
+		pollCtx, pollCancel := context.WithTimeout(ctx, 10*time.Minute)
 		events, pollErr := g.Poll(pollCtx)
 		pollCancel()
 		status.LastPoll, status.LastError = now(), ""
@@ -288,6 +288,12 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 		return "unsupported"
 	}
 	if task.Status != "running" {
+		if task.Session.ConversationID != "" && task.Status != "starting" && task.Status != "preparing" {
+			_, observation := terminalFor(task.Session).Inspect(ctx, task)
+			if observation.State == "missing" || observation.State == "exited" {
+				return "resumable"
+			}
+		}
 		return "offline"
 	}
 	task, observation, err := s.Refresh(ctx, task)
@@ -298,4 +304,9 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 		return "online"
 	}
 	return "offline"
+}
+
+func (s Service) CanDeliver(ctx context.Context, id string) bool {
+	state := s.WatchSessionState(ctx, id)
+	return state == "online" || state == "resumable"
 }

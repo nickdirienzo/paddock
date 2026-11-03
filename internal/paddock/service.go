@@ -13,7 +13,7 @@ type Service struct {
 	Store      *Store
 	Executable string
 }
-type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base string }
+type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base, ID, SignalID, RelatedTaskID string }
 
 func ValidateStateHome(home, repo string) error {
 	if rel, err := filepath.Rel(repo, home); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
@@ -70,12 +70,19 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	if err != nil {
 		return empty, fmt.Errorf("%s is not installed or executable: %w", o.Agent, err)
 	}
-	term, session, err := SelectTerminal(ctx, o.Backend)
+	_, session, err := SelectTerminal(ctx, o.Backend)
 	if err != nil {
 		return empty, err
 	}
-	id := newID()
+	id := o.ID
+	if id == "" {
+		id = newID()
+	}
+	if !validID(id) {
+		return empty, fmt.Errorf("invalid reserved task ID")
+	}
 	session.Agent = o.Agent
+	session.Generation = 1
 	if o.Agent == "codex" {
 		session.AgentHome = os.Getenv("CODEX_HOME")
 		if session.AgentHome == "" {
@@ -84,11 +91,26 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 			}
 		}
 	}
+	if o.Agent == "claude" {
+		session.ConversationID = newConversationID()
+		session.AgentHome = os.Getenv("CLAUDE_CONFIG_DIR")
+		if session.AgentHome == "" {
+			if h, e := os.UserHomeDir(); e == nil {
+				session.AgentHome = filepath.Join(h, ".claude")
+			}
+		}
+	}
+	if session.AgentHome != "" {
+		session.AgentHome, err = filepath.Abs(session.AgentHome)
+		if err != nil {
+			return empty, err
+		}
+	}
 	session.TrustProject = trusted && o.Agent == "codex"
 	session.AgentPath = agentPath
 	session.Name = "paddock-" + id
-	t := Task{ID: id, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
-		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), Session: session}
+	t := Task{ID: id, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
+		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
 	// Never put state or new worktrees inside the caller's checkout.
 	if err = ValidateStateHome(s.Store.Home, repo.Root); err != nil {
 		return empty, err
@@ -110,6 +132,19 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 		return t, err
 	}
 	t.Status = "starting"
+	return s.launchTask(ctx, t)
+}
+
+func (s Service) launchTask(ctx context.Context, t Task) (Task, error) {
+	term := terminalFor(t.Session)
+	var err error
+	fail := func(cause error) (Task, error) {
+		if err := s.Store.Status(t.ID, "failed", cause.Error(), "starting"); err != nil {
+			return t, err
+		}
+		current, _ := s.Store.Get(t.ID)
+		return current, fmt.Errorf("task %s: %w", t.ID, cause)
+	}
 	launched, launchErr := term.Launch(ctx, t, s.Executable, s.Store.Home)
 	if launchErr != nil {
 		// A timed-out launch may have succeeded. Inspect the deterministic name;
@@ -119,21 +154,21 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 			launched = recovered
 		} else {
 			if obs.State == "unknown" {
-				return t, fmt.Errorf("task %s launch outcome is uncertain: %w; use show to reconcile before retrying", id, launchErr)
+				return t, fmt.Errorf("task %s launch outcome is uncertain: %w; use show to reconcile before retrying", t.ID, launchErr)
 			}
-			current, e := s.Store.Get(id)
+			current, e := s.Store.Get(t.ID)
 			if e == nil && current.Status != "starting" {
 				return current, nil
 			}
 			return fail(launchErr)
 		}
 	}
-	if err = s.Store.UpdateSession(id, func(v *Session) { v.ID = launched.ID; v.BlockID = launched.BlockID; v.WindowID = launched.WindowID }); err != nil {
+	if err = s.Store.UpdateSession(t.ID, func(v *Session) { v.ID = launched.ID; v.BlockID = launched.BlockID; v.WindowID = launched.WindowID }); err != nil {
 		return t, err
 	}
 	// Wait briefly for the supervisor to claim the task, catching silent failures.
 	for i := 0; i < 50; i++ {
-		t, err = s.Store.Get(id)
+		t, err = s.Store.Get(t.ID)
 		if err != nil {
 			return t, err
 		}
@@ -156,14 +191,27 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 func (s Service) Refresh(ctx context.Context, t Task) (Task, Observation, error) {
 	session, obs := terminalFor(t.Session).Inspect(ctx, t)
 	if session.ID != t.Session.ID || session.BlockID != t.Session.BlockID || session.WindowID != t.Session.WindowID {
-		if err := s.Store.UpdateSession(t.ID, func(v *Session) { v.ID = session.ID; v.BlockID = session.BlockID; v.WindowID = session.WindowID }); err != nil {
+		if err := s.Store.update(t.ID, func(current *Task) error {
+			if current.Session.Generation == t.Session.Generation {
+				current.Session.ID, current.Session.BlockID, current.Session.WindowID = session.ID, session.BlockID, session.WindowID
+			}
+			return nil
+		}); err != nil {
 			return t, obs, err
 		}
 	}
 	// starting has a grace period: another CLI may inspect between intent and launch.
 	age, _ := time.Parse(time.RFC3339Nano, t.UpdatedAt)
 	if (t.Status == "running" || (t.Status == "starting" && time.Since(age) > 30*time.Second)) && (obs.State == "missing" || obs.State == "exited") {
-		if err := s.Store.Status(t.ID, "interrupted", "terminal ended without a recorded agent exit", t.Status); err != nil {
+		if err := s.Store.update(t.ID, func(current *Task) error {
+			if current.Session.Generation == t.Session.Generation && current.Status == t.Status {
+				current.Status, current.Error = "interrupted", "terminal ended without a recorded agent exit"
+				// A crash has no supervisor Finish event. Start retention when its
+				// stopped process is first confirmed, rather than its old launch.
+				current.LastActivityAt = now()
+			}
+			return nil
+		}); err != nil {
 			return t, obs, err
 		}
 	}

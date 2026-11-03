@@ -24,6 +24,7 @@ const githubHelp = `GitHub coordination:
   paddock github unroute <pattern>
   paddock github identities
   paddock github watch <PR-URL> --task <id> --allow <engineer,engineer>
+  paddock github routing <PR-URL> --mode direct|planner [--tasks id,id] [--repos alias,path] [--model MODEL]
   paddock github unwatch <PR-URL>
   paddock github start [--interval 30s]
   paddock github stop
@@ -43,7 +44,7 @@ func runGitHub(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
-	allowed, ok := map[string]string{"auth": "name mode login app-id installation-id private-key-file", "installations": "app-id private-key-file", "route": "identity", "unroute": "", "identities": "", "watch": "task allow", "unwatch": "", "start": "interval", "stop": "", "poll": "interval json", "status": "json", "reply": "queue"}[command]
+	allowed, ok := map[string]string{"auth": "name mode login app-id installation-id private-key-file", "installations": "app-id private-key-file", "route": "identity", "unroute": "", "identities": "", "watch": "task allow", "routing": "mode tasks repos model", "unwatch": "", "start": "interval", "stop": "", "poll": "interval json", "status": "json", "reply": "queue"}[command]
 	if !ok {
 		return fmt.Errorf("unknown GitHub command; use paddock github --help")
 	}
@@ -55,7 +56,7 @@ func runGitHub(args []string, out io.Writer) error {
 		fmt.Fprint(out, githubHelp)
 		return nil
 	}
-	count := map[string]int{"auth": 0, "installations": 0, "route": 1, "unroute": 1, "identities": 0, "watch": 1, "unwatch": 1, "start": 0, "stop": 0, "poll": 0, "status": 0, "reply": 2}[command]
+	count := map[string]int{"auth": 0, "installations": 0, "route": 1, "unroute": 1, "identities": 0, "watch": 1, "routing": 1, "unwatch": 1, "start": 0, "stop": 0, "poll": 0, "status": 0, "reply": 2}[command]
 	if len(pos) != count {
 		return fmt.Errorf("%s expects %d arguments; see paddock github --help", command, count)
 	}
@@ -198,6 +199,11 @@ func runGitHub(args []string, out io.Writer) error {
 			return fmt.Errorf("watch registered, but poller startup failed: %w", e)
 		}
 		fmt.Fprintln(out, "Shared GitHub poller running, PID", status.PID)
+	case "routing":
+		if err = coordinator.ConfigureRouting(ctx, pos[0], flags["mode"], flags["model"], csv(flags["tasks"]), csv(flags["repos"])); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "Routing", pos[0], "with", flags["mode"])
 	case "unwatch":
 		repo, n, e := paddock.ParsePullRequest(pos[0])
 		if e != nil {

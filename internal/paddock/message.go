@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -25,12 +24,31 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	if task.Session.Agent != "codex" {
 		return "", fmt.Errorf("native message delivery is not available for %s", task.Session.Agent)
 	}
+	release, err := s.Store.taskLease(task.ID, "operation")
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrAgentOffline, err)
+	}
+	defer release()
+	task, err = s.Store.Get(task.ID)
+	if err != nil {
+		return "", err
+	}
 	task, observation, err := s.Refresh(ctx, task)
 	if err != nil {
 		return "", err
 	}
 	if task.Status != "running" || observation.State != "running" {
-		return "", fmt.Errorf("%w: task %s does not have a confirmed running agent", ErrAgentOffline, task.ID)
+		if task.Session.ConversationID == "" {
+			return "", fmt.Errorf("%w: task %s has no saved conversation", ErrAgentOffline, task.ID)
+		}
+		task, err = s.resumeLocked(ctx, task.ID)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrAgentOffline, err)
+		}
+		_, observation = terminalFor(task.Session).Inspect(ctx, task)
+		if task.Status != "running" || observation.State != "running" {
+			return "", fmt.Errorf("%w: agent has not started yet", ErrAgentOffline)
+		}
 	}
 	thread, err := codexTaskThread(ctx, task)
 	if err != nil {
@@ -43,6 +61,9 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	defer cancel()
 	command := exec.CommandContext(ctx, task.Session.AgentPath, "queue", "--thread", thread, "--message", body)
 	command.Env = agentControlEnv(task)
+	if err = s.Store.TouchActivity(task.ID); err != nil {
+		return "", err
+	}
 	if _, err = command.Output(); err != nil {
 		return thread, fmt.Errorf("Codex queue delivery outcome uncertain: %w; inspect the session before retrying", err)
 	}
@@ -52,13 +73,17 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 func agentControlEnv(task Task) []string {
 	env := credentialFreeEnvironment(os.Environ())
 	if task.Session.AgentHome != "" {
+		key := "CODEX_HOME"
+		if task.Session.Agent == "claude" {
+			key = "CLAUDE_CONFIG_DIR"
+		}
 		filtered := make([]string, 0, len(env)+1)
 		for _, v := range env {
-			if !strings.HasPrefix(v, "CODEX_HOME=") {
+			if !strings.HasPrefix(v, key+"=") {
 				filtered = append(filtered, v)
 			}
 		}
-		env = append(filtered, "CODEX_HOME="+task.Session.AgentHome)
+		env = append(filtered, key+"="+task.Session.AgentHome)
 	}
 	return env
 }
@@ -117,9 +142,23 @@ func codexTaskThread(ctx context.Context, task Task) (string, error) {
 	if err = encoder.Encode(map[string]any{"method": "initialized"}); err != nil {
 		return "", err
 	}
-	cwd, err := filepath.EvalSymlinks(task.Worktree)
-	if err != nil {
-		return "", err
+	cwd := canonicalWorkspacePath(task.Worktree)
+	if task.Session.ConversationID != "" {
+		// A persisted ID is authoritative. Native resumes can change sourceKind;
+		// do not lose an existing thread through the CLI-only discovery filter.
+		var response struct {
+			Thread struct {
+				ID  string `json:"id"`
+				Cwd string `json:"cwd"`
+			} `json:"thread"`
+		}
+		if err = call(2, "thread/read", map[string]any{"threadId": task.Session.ConversationID, "includeTurns": false}, &response); err != nil {
+			return "", err
+		}
+		if response.Thread.ID != task.Session.ConversationID || canonicalWorkspacePath(response.Thread.Cwd) != cwd {
+			return "", fmt.Errorf("saved Codex conversation does not match the task workspace")
+		}
+		return response.Thread.ID, nil
 	}
 	var response struct {
 		Data []struct {
@@ -136,8 +175,8 @@ func codexTaskThread(ctx context.Context, task Task) (string, error) {
 	}
 	var matches []string
 	for _, thread := range response.Data {
-		path, e := filepath.EvalSymlinks(thread.Cwd)
-		if e == nil && path == cwd && (task.Session.ConversationID == "" || thread.ID == task.Session.ConversationID) {
+		path := canonicalWorkspacePath(thread.Cwd)
+		if path == cwd && (task.Session.ConversationID == "" || thread.ID == task.Session.ConversationID) {
 			matches = append(matches, thread.ID)
 		}
 	}

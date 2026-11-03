@@ -10,23 +10,31 @@ import (
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
 type Task struct {
-	ID         string  `json:"id"`
-	ParentID   string  `json:"parent_id,omitempty"`
-	Prompt     string  `json:"prompt"`
-	Repo       string  `json:"repo"`
-	CommonDir  string  `json:"common_dir"`
-	Base       string  `json:"base"`
-	BaseCommit string  `json:"base_commit"`
-	Branch     string  `json:"branch"`
-	Worktree   string  `json:"worktree"`
-	Status     string  `json:"status"`
-	Error      string  `json:"error,omitempty"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
-	Session    Session `json:"session"`
+	ID                 string  `json:"id"`
+	SignalID           string  `json:"signal_id,omitempty"`
+	RelatedTaskID      string  `json:"related_task_id,omitempty"`
+	ParentID           string  `json:"parent_id,omitempty"`
+	Prompt             string  `json:"prompt"`
+	Repo               string  `json:"repo"`
+	CommonDir          string  `json:"common_dir"`
+	Base               string  `json:"base"`
+	BaseCommit         string  `json:"base_commit"`
+	Branch             string  `json:"branch"`
+	Worktree           string  `json:"worktree"`
+	Status             string  `json:"status"`
+	Error              string  `json:"error,omitempty"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
+	LastActivityAt     string  `json:"last_activity_at,omitempty"`
+	WorkspaceCommit    string  `json:"workspace_commit,omitempty"`
+	WorkspaceRemovedAt string  `json:"workspace_removed_at,omitempty"`
+	Session            Session `json:"session"`
 }
 
 type Session struct {
+	Generation     int    `json:"generation,omitempty"`
+	Resume         bool   `json:"resume,omitempty"`
+	ResumeNotice   string `json:"resume_notice,omitempty"`
 	ConversationID string `json:"conversation_id,omitempty"`
 	AgentHome      string `json:"agent_home,omitempty"`
 	Agent          string `json:"agent"`

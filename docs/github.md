@@ -156,15 +156,18 @@ paddock github stop                 # all registrations remain saved
 ```
 
 Status includes `poller.running` (checked against the process lock), PID, mode, interval,
-last poll time/error, and log path. `watch_sessions` reports `online`, `offline`,
+last poll time/error, and log path. `watch_sessions` reports `online`, `resumable`, `offline`,
 `unknown`, `missing`, or `unsupported` for each PR's task. A running service may still
 report API errors; those are retried and don't terminate the service. To change the
 interval or load an upgraded binary, stop and start it. Logs live in
 `$PADDOCK_HOME/github-poller.log` (mode 0600).
 
-Offline or unconfirmed sessions are skipped before claiming comments. Their watches
-remain registered, and comments remain eligible when that same task is running again.
-The poller does not launch or restart agents. An exited agent's already queued replies
+Stopped Codex tasks with a saved conversation ID are reported as `resumable`. A new
+authorized comment wakes the same task and conversation before native queue delivery.
+If the worktree was collected, it is reconstructed from Git with an explicit recovery
+notice. Missing history, uncertain launches, or unavailable terminals keep comments pending.
+Tasks without a saved identity remain offline until explicitly resumed; no replacement
+conversation is created. An exited agent's already queued replies
 and delivery receipts can still be published. Native message routing currently supports
 Codex; other agents are reported as unsupported.
 
@@ -180,7 +183,7 @@ Inline requests include the original file and line context.
 
 ## Conversation routing
 
-Every new, nonempty comment from an approved author on a watched PR is queued to
+With default direct routing, every new, nonempty comment from an approved author on a watched PR is queued to
 that PR's existing task session. No mention, command prefix, keyword, or LLM routing
 step is needed. `tests are failing`, questions, and ordinary discussion all reach the
 same agent, which interprets them in context. Bot accounts and Paddock-generated
@@ -246,3 +249,12 @@ the original coding action to be repeated.
 
 These are at-most-once action attempts, not a distributed exactly-once transaction.
 Deleted local state loses deduplication history; keep the registry on a local filesystem.
+
+## Optional model-backed routing
+
+Enable `paddock github routing PR_URL --mode planner --tasks TASK_ID --repos REPO_ALIAS`
+to let an ephemeral Codex planner inspect context and choose actions beyond the owning
+session. Scope is configured by the operator and does not come from comment text.
+Direct routing remains the default and shares the same signal executor and replay
+protection. See [orchestration](orchestration.md) for model/prompt configuration,
+context reads, action types, and recovery semantics.

@@ -67,7 +67,7 @@ func TestStorePersistenceAndRelationships(t *testing.T) {
 		t.Fatal(e)
 	}
 	got, e = s.Get(child.ID)
-	if e != nil || got.Status != "completed" || got.Session.ExitCode == nil || *got.Session.ExitCode != 0 || got.Session.ID != "terminal-id" {
+	if e != nil || got.Status != "stopped" || got.Session.ExitCode == nil || *got.Session.ExitCode != 0 || got.Session.ID != "terminal-id" {
 		t.Fatalf("%+v %v", got, e)
 	}
 }

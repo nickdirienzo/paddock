@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type GitHubRemote interface {
 }
 type GitHubCoordinator struct {
 	Service Service
+	Planner DecisionPlanner
 	Remote  GitHubRemote
 	remotes map[string]GitHubRemote
 }
@@ -88,6 +90,9 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 				return fmt.Errorf("PR is already owned by task %s", old.TaskID)
 			}
 			w.Since = old.Since
+			w.Routing = old.Routing
+			w.Orchestration = old.Orchestration
+			w.PlannerModel = old.PlannerModel
 		}
 		v.Watches[w.Key()] = w
 		return nil
@@ -199,7 +204,7 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key string) ([]GitHubEvent, error) {
 	processed := []GitHubEvent{}
 	w := state.Watches[key]
-	if g.Service.WatchSessionState(ctx, w.TaskID) != "online" {
+	if w.Routing != "planner" && !g.Service.CanDeliver(ctx, w.TaskID) {
 		return processed, nil // Leave comments unclaimed until this registered agent is available.
 	}
 	api, binding, err := g.remoteFor(state, w.Repo, nil)
@@ -235,6 +240,16 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 		}
 		id := githubEventID(w, comment)
 		if old, exists := state.Events[id]; exists {
+			if old.Status == "routing" || old.Status == "pending" {
+				updated, e := g.routeSignal(ctx, w, old)
+				if e != nil {
+					return processed, e
+				}
+				if updated.Status != "pending" {
+					processed = append(processed, updated)
+				}
+				continue
+			}
 			if old.Status == "claimed" {
 				old.Status = "uncertain"
 				old.Error = "previous poll ended during an action; inspect the agent before taking further action"
@@ -260,38 +275,23 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 		if !claimed {
 			continue
 		}
-		event.Status = "done"
 		if plan.Action != "ignore" {
-			task, err := g.Service.Store.Get(w.TaskID)
-			if err != nil {
-				event.Status = "failed"
-				event.Error = err.Error()
-			} else {
-				message := fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\n\n%s\n\nInterpret this comment in the context of your existing task. Acknowledgements and discussion may require no code changes. Report any result to the PR with: PADDOCK_HOME=%s %s github reply %s %s", comment.User.Login, comment.HTMLURL, comment.Path, comment.Line, plan.Text, quote(g.Service.Store.Home), quote(g.Service.Executable), id, quote("Describe the result and validation."))
-				thread, e := g.Service.Message(ctx, task, message)
-				if errors.Is(e, ErrAgentOffline) {
-					// The agent exited after our liveness check. No queue call
-					// was attempted, so release only this unattempted claim.
-					if err := g.Service.Store.UpdateGitHub(func(v *GitHubState) error {
-						delete(v.Events, id)
-						return nil
-					}); err != nil {
-						return processed, err
-					}
-					break
-				}
-				if e != nil {
-					event.Status = "uncertain"
-					event.Error = e.Error()
-				} else {
-					event.Result = "Queued for agent session " + thread
-					event.Receipt = "pending"
-				}
+			event.Status = "routing"
+			if err = g.saveEvent(event); err != nil {
+				return processed, err
 			}
-		}
-		event.UpdatedAt = now()
-		if err = g.saveEvent(event); err != nil {
-			return processed, err
+			event, err = g.routeSignal(ctx, w, event)
+			if err != nil {
+				return processed, err
+			}
+			if event.Status == "pending" {
+				continue
+			}
+		} else {
+			event.Status = "done"
+			if err = g.saveEvent(event); err != nil {
+				return processed, err
+			}
 		}
 		processed = append(processed, event)
 		state.Events[id] = event
@@ -301,7 +301,16 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 
 func (g GitHubCoordinator) saveEvent(event GitHubEvent) error {
 	event.UpdatedAt = now()
-	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error { v.Events[event.ID] = event; return nil })
+	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error {
+		// Recipient grants can be recorded during routing before its summary is saved.
+		for _, id := range v.Events[event.ID].RecipientTaskIDs {
+			if !slices.Contains(event.RecipientTaskIDs, id) {
+				event.RecipientTaskIDs = append(event.RecipientTaskIDs, id)
+			}
+		}
+		v.Events[event.ID] = event
+		return nil
+	})
 }
 
 func (g GitHubCoordinator) acknowledge(ctx context.Context, state GitHubState, event GitHubEvent) error {
@@ -352,7 +361,7 @@ func (g GitHubCoordinator) reply(ctx context.Context, eventID, body string) (Git
 	if !ok {
 		return post, fmt.Errorf("event not found")
 	}
-	if task := os.Getenv("PADDOCK_TASK_ID"); task != "" && task != event.TaskID {
+	if task := os.Getenv("PADDOCK_TASK_ID"); task != "" && task != event.TaskID && !slices.Contains(event.RecipientTaskIDs, task) {
 		return post, fmt.Errorf("this agent does not own the PR event")
 	}
 	w, ok := state.Watches[event.WatchKey]
@@ -440,7 +449,7 @@ func (g GitHubCoordinator) EnqueueReply(eventID, body string) (GitHubPost, error
 		if !ok {
 			return fmt.Errorf("event not found")
 		}
-		if task := os.Getenv("PADDOCK_TASK_ID"); task != "" && task != event.TaskID {
+		if task := os.Getenv("PADDOCK_TASK_ID"); task != "" && task != event.TaskID && !slices.Contains(event.RecipientTaskIDs, task) {
 			return fmt.Errorf("this agent does not own the PR event")
 		}
 		w, ok := state.Watches[event.WatchKey]

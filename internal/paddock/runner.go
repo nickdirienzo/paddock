@@ -35,9 +35,25 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 			}
 		}
 	}
-	c := exec.Command(t.Session.AgentPath, append(args, "--", prompt)...)
+	if t.Session.Resume {
+		if t.Session.Agent == "codex" {
+			args = append(args, "resume", t.Session.ConversationID)
+		} else {
+			args = append(args, "--resume", t.Session.ConversationID)
+		}
+		// Never replay the original assignment on resume.
+		if t.Session.ResumeNotice != "" {
+			args = append(args, "--", t.Session.ResumeNotice)
+		}
+	} else {
+		if t.Session.Agent == "claude" && t.Session.ConversationID != "" {
+			args = append(args, "--session-id", t.Session.ConversationID)
+		}
+		args = append(args, "--", prompt)
+	}
+	c := exec.Command(t.Session.AgentPath, args...)
 	c.Dir = t.Worktree
-	c.Env = append(credentialFreeEnvironment(os.Environ()), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
+	c.Env = append(agentControlEnv(t), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
 		"PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -47,12 +63,26 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 
 // RunAgent runs inside the terminal. Its lifetime is independent of `paddock run`.
 func RunAgent(store *Store, id, exe string) int {
+	return RunAgentGeneration(store, id, exe, 0)
+}
+
+func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	t, err := store.Get(id)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err = store.Claim(t.ID); err != nil {
+	lease, err := store.taskLease(t.ID, "process")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer lease()
+	if t.Session.Generation != generation {
+		fmt.Fprintln(os.Stderr, "stale supervisor generation")
+		return 1
+	}
+	if err = store.claimGeneration(t.ID, &generation); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -81,6 +111,9 @@ func RunAgent(store *Store, id, exe string) int {
 	if err != nil {
 		message = err.Error()
 	} else {
+		bindingCtx, bindingCancel := context.WithCancel(context.Background())
+		bindingDone := make(chan struct{})
+		go func() { defer close(bindingDone); captureConversation(bindingCtx, store, t) }()
 		done := make(chan error, 1)
 		go func() { done <- c.Wait() }()
 		var timer <-chan time.Time
@@ -103,6 +136,8 @@ func RunAgent(store *Store, id, exe string) int {
 				timer = nil
 			}
 		}
+		bindingCancel()
+		<-bindingDone
 		code = c.ProcessState.ExitCode()
 		if code < 0 {
 			code = 128
