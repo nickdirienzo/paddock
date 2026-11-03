@@ -30,13 +30,13 @@ func (s Service) noOpenPulls(ctx context.Context, t Task) error {
 	if err != nil {
 		return err
 	}
-	remotes, err := git(ctx, t.Worktree, "remote")
+	remotes, err := taskGit(ctx, t, "remote")
 	if err != nil {
 		return err
 	}
 	repos, owners := map[string]bool{}, map[string]bool{}
 	for _, remote := range strings.Fields(remotes) {
-		raw, err := git(ctx, t.Worktree, "remote", "get-url", remote)
+		raw, err := taskGit(ctx, t, "remote", "get-url", remote)
 		if err != nil {
 			return err
 		}

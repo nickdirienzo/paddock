@@ -59,6 +59,10 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				result.Reason = err.Error()
 				return
 			}
+			if t.RuntimeName() == "openshell" {
+				result = s.gcSandbox(ctx, t, config, apply)
+				return
+			}
 			if t.Worktree != filepath.Join(s.Store.Home, "worktrees", t.ID) {
 				result.Reason = "worktree is outside the managed task path"
 				return
@@ -140,7 +144,7 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 			if !apply {
 				return
 			}
-			head, err := git(ctx, t.Worktree, "rev-parse", "HEAD")
+			head, err := taskGit(ctx, t, "rev-parse", "HEAD")
 			if err != nil {
 				result.Eligible = false
 				result.Reason = err.Error()
@@ -165,7 +169,7 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				err = s.noPendingWork(t.ID)
 			}
 			if err == nil {
-				current, e := git(ctx, t.Worktree, "rev-parse", "HEAD")
+				current, e := taskGit(ctx, t, "rev-parse", "HEAD")
 				if e != nil {
 					err = e
 				} else if current != head {
@@ -187,7 +191,7 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 }
 
 func cleanWorkspace(ctx context.Context, t Task, config LifecycleConfig) error {
-	flags, err := git(ctx, t.Worktree, "ls-files", "-v", "-z")
+	flags, err := taskGit(ctx, t, "ls-files", "-v", "-z")
 	if err != nil {
 		return err
 	}
@@ -196,7 +200,7 @@ func cleanWorkspace(ctx context.Context, t Task, config LifecycleConfig) error {
 			return fmt.Errorf("index flags may hide local changes (skip-worktree or assume-unchanged)")
 		}
 	}
-	status, err := git(ctx, t.Worktree, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
+	status, err := taskGit(ctx, t, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		return err
 	}
@@ -205,7 +209,7 @@ func cleanWorkspace(ctx context.Context, t Task, config LifecycleConfig) error {
 	}
 	// Git's normal removal discards ignored files; .env and other irreplaceable
 	// ignored inputs are protected unless the operator names a disposable dir.
-	ignored, err := git(ctx, t.Worktree, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+	ignored, err := taskGit(ctx, t, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
 	if err != nil {
 		return err
 	}
@@ -228,17 +232,17 @@ func cleanWorkspace(ctx context.Context, t Task, config LifecycleConfig) error {
 }
 
 func pushedWorkspace(ctx context.Context, t Task) error {
-	remote, err := git(ctx, t.Worktree, "config", "--get", "branch."+t.Branch+".remote")
+	remote, err := taskGit(ctx, t, "config", "--get", "branch."+t.Branch+".remote")
 	if err != nil || remote == "" || remote == "." {
 		return fmt.Errorf("no remote upstream; cannot prove commits are pushed")
 	}
-	ref, err := git(ctx, t.Worktree, "config", "--get", "branch."+t.Branch+".merge")
+	ref, err := taskGit(ctx, t, "config", "--get", "branch."+t.Branch+".merge")
 	if err != nil || !strings.HasPrefix(ref, "refs/heads/") {
 		return fmt.Errorf("no branch upstream; cannot prove commits are pushed")
 	}
 	// Query live remote refs, not a possibly stale origin/* tracking ref. A
 	// missing/deleted upstream or unavailable ancestry retains the workspace.
-	refs, err := git(ctx, t.Worktree, "ls-remote", "--exit-code", "--heads", "--", remote, ref)
+	refs, err := taskGit(ctx, t, "ls-remote", "--exit-code", "--heads", "--", remote, ref)
 	if err != nil {
 		return fmt.Errorf("cannot verify remote commits: %w", err)
 	}
@@ -246,7 +250,7 @@ func pushedWorkspace(ctx context.Context, t Task) error {
 	if len(fields) != 2 || fields[1] != ref {
 		return fmt.Errorf("remote upstream is ambiguous or missing")
 	}
-	if _, err = git(ctx, t.Worktree, "merge-base", "--is-ancestor", "HEAD", fields[0]); err != nil {
+	if _, err = taskGit(ctx, t, "merge-base", "--is-ancestor", "HEAD", fields[0]); err != nil {
 		return fmt.Errorf("unpushed commits or remote ancestry unavailable")
 	}
 	return nil

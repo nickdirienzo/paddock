@@ -1,0 +1,3 @@
+# OpenShell supplies isolation, including for turns resumed by the native daemon.
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"

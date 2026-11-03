@@ -456,7 +456,11 @@ func (o Orchestrator) act(ctx context.Context, signal Signal, out ActionOutcome)
 				return "", err
 			}
 			e := state.Events[signal.ID]
-			text = fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\nOrigin task: %s\n\n%s\n\nReply through: PADDOCK_HOME=%s %s github reply %s %s", e.Comment.User.Login, e.Comment.HTMLURL, e.Comment.Path, e.Comment.Line, signal.TaskID, text, quote(o.Service.Store.Home), quote(o.Service.Executable), signal.ID, quote("Describe the result and validation."))
+			reply := fmt.Sprintf("Reply through: PADDOCK_HOME=%s %s github reply %s %s", quote(o.Service.Store.Home), quote(o.Service.Executable), signal.ID, quote("Describe the result and validation."))
+			if task.RuntimeName() == "openshell" {
+				reply = "Reply on this PR using ordinary gh inside this sandbox, describing the result and validation. For a review-thread comment, reply in that review thread. The host owns Paddock coordination."
+			}
+			text = fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\nOrigin task: %s\n\n%s\n\n%s", e.Comment.User.Login, e.Comment.HTMLURL, e.Comment.Path, e.Comment.Line, signal.TaskID, text, reply)
 		}
 		return o.Service.Message(ctx, task, text)
 	case "delegate", "create_task":

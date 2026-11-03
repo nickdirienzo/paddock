@@ -139,7 +139,11 @@ func (t terminal) Launch(ctx context.Context, task Task, exe, home string) (Sess
 	command := launchCommand(exe, home, task.ID)
 	command = append(command, "--generation", strconv.Itoa(s.Generation))
 	if t.backend == "rex" {
-		args := []string{"new", s.Name, "-c", task.Worktree, "--shell=none", "--json", "--"}
+		dir := task.Worktree
+		if task.RuntimeName() == "openshell" {
+			dir = home
+		}
+		args := []string{"new", s.Name, "-c", dir, "--shell=none", "--json", "--"}
 		b, err := t.rex(ctx, append(args, command...)...)
 		if err != nil {
 			return s, err
@@ -243,6 +247,25 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 	}
 	b, err = t.rex(ctx, "block", "call", "-s", s.ID, "-b", s.BlockID, "process")
 	if err != nil {
+		// Rex may retain an empty session after closing its last pane. Confirm
+		// absence using a successful listing, never by parsing an error string.
+		listing, listErr := t.rex(ctx, "block", "ls", "-s", s.ID, "--json")
+		var blocks struct {
+			Blocks []struct {
+				ID string `json:"block_id"`
+			} `json:"blocks"`
+		}
+		if listErr == nil && json.Unmarshal(listing, &blocks) == nil && blocks.Blocks != nil {
+			missing := true
+			for _, block := range blocks.Blocks {
+				if block.ID == "" || block.ID == s.BlockID {
+					missing = false
+				}
+			}
+			if missing {
+				return s, Observation{State: "missing"}
+			}
+		}
 		return unknown(err)
 	}
 	var v struct {

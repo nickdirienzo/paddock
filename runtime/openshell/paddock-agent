@@ -1,0 +1,75 @@
+#!/usr/bin/python3
+"""Hold a sandbox-local process lease and record confirmed native agent exit."""
+import base64
+import fcntl
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+lock = open('/sandbox/agent.lock', 'a')
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit('A native agent is already running in this task sandbox.')
+
+# OpenShell substitutes only opaque provider references at allowed endpoints.
+# Codex parses id_token locally; the unsigned local metadata is not a credential.
+if pathlib.Path(sys.argv[2]).name == 'codex' and os.environ.get('CODEX_AUTH_ACCESS_TOKEN'):
+    encode = lambda v: base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip('=')
+    identity = '.'.join([encode({'alg': 'none', 'typ': 'JWT'}), encode({
+        'iss': 'https://auth.openai.com', 'aud': 'codex', 'sub': 'paddock-sandbox',
+        'email': 'agent@paddock.local', 'https://api.openai.com/auth': {'chatgpt_account_id': os.environ.get('CODEX_ACCOUNT_ID', '')}, 'iat': int(time.time()), 'exp': int(time.time()) + 3600,
+    }), 'placeholder'])
+    home = pathlib.Path(os.environ['CODEX_HOME'])
+    home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    auth = home / 'auth.json'
+    auth.write_text(json.dumps({'auth_mode': 'chatgptAuthTokens', 'OPENAI_API_KEY': None,
+        'tokens': {'id_token': identity, 'access_token': os.environ['CODEX_AUTH_ACCESS_TOKEN'],
+                   'refresh_token': '', 'account_id': os.environ.get('CODEX_ACCOUNT_ID') or os.environ.get('CODEX_AUTH_ACCOUNT_ID', '')},
+        'last_refresh': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}))
+    auth.chmod(0o600)
+
+# Start the native shared owner explicitly. On minimal containers the TUI can
+# otherwise fall back to an in-process server while `codex queue` uses another.
+if pathlib.Path(sys.argv[2]).name == 'codex':
+    result = subprocess.run([sys.argv[2], 'app-server', 'daemon', 'start'], stdout=subprocess.DEVNULL)
+    if result.returncode:
+        sys.exit('Could not start the native Codex session server.')
+    if 'resume' in sys.argv[3:]:
+        index = sys.argv.index('resume', 3)
+        result = subprocess.run(['/usr/local/bin/paddock-codex-state', 'resume', sys.argv[index + 1]])
+        if result.returncode:
+            sys.exit('Could not restore the native conversation in the OpenShell runtime.')
+
+marker = pathlib.Path('/sandbox/agent-exit.json')
+marker.unlink(missing_ok=True)
+agent_args = sys.argv[2:]
+claude = pathlib.Path(sys.argv[2]).name == 'claude'
+if claude:
+    version = subprocess.check_output([sys.argv[2], '--version'], text=True).strip()
+    if version != '2.1.286 (Claude Code)':
+        sys.exit('Claude inbox delivery requires qualified Claude Code 2.1.286.')
+    agent_args = [sys.argv[2], '--messaging-socket-path', '/sandbox/claude.sock'] + sys.argv[3:]
+# The child owns native approvals and turn completion; never infer idle from PTY output.
+child = subprocess.Popen(agent_args)
+if claude:
+    flag = '--resume' if '--resume' in agent_args else '--session-id'
+    session = agent_args[agent_args.index(flag) + 1]
+    state = pathlib.Path('/sandbox/claude-process.json')
+    state.write_text(json.dumps({'pid': child.pid, 'conversation': session,
+                                'generation': int(sys.argv[1])}))
+    state.chmod(0o600)
+while True:
+    try:
+        code = child.wait()
+        break
+    except KeyboardInterrupt:
+        # The foreground process group receives the same interrupt.
+        continue
+partial = marker.with_suffix('.tmp')
+partial.write_text(json.dumps({'generation': int(sys.argv[1]), 'code': code}))
+partial.replace(marker)
+sys.exit(code if code >= 0 else 128 - code)

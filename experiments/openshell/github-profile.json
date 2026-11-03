@@ -1,0 +1,97 @@
+{
+  "id": "paddock-github",
+  "display_name": "Paddock GitHub App test",
+  "description": "App access restricted to nickdirienzo/paddock",
+  "category": "source_control",
+  "credentials": [
+    {
+      "name": "api_token",
+      "env_vars": [
+        "GITHUB_TOKEN",
+        "GH_TOKEN"
+      ],
+      "required": true,
+      "auth_style": "bearer",
+      "header_name": "authorization"
+    }
+  ],
+  "endpoints": [
+    {
+      "host": "api.github.com",
+      "port": 443,
+      "protocol": "rest",
+      "enforcement": "enforce",
+      "rules": [
+        {
+          "allow": {
+            "method": "GET",
+            "path": "/repos/nickdirienzo/paddock"
+          }
+        },
+        {
+          "allow": {
+            "method": "GET",
+            "path": "/repos/nickdirienzo/paddock/**"
+          }
+        },
+        {
+          "allow": {
+            "method": "POST",
+            "path": "/repos/nickdirienzo/paddock/**"
+          }
+        },
+        {
+          "allow": {
+            "method": "PATCH",
+            "path": "/repos/nickdirienzo/paddock/**"
+          }
+        },
+        {
+          "allow": {
+            "method": "GET",
+            "path": "/installation/repositories"
+          }
+        }
+      ]
+    },
+    {
+      "host": "api.github.com",
+      "port": 443,
+      "path": "/graphql",
+      "protocol": "graphql",
+      "access": "read-write",
+      "enforcement": "enforce"
+    },
+    {
+      "host": "github.com",
+      "port": 443,
+      "path": "/nickdirienzo/paddock.git/**",
+      "protocol": "rest",
+      "enforcement": "enforce",
+      "rules": [
+        {
+          "allow": {
+            "method": "GET",
+            "path": "/nickdirienzo/paddock.git/**"
+          }
+        },
+        {
+          "allow": {
+            "method": "POST",
+            "path": "/nickdirienzo/paddock.git/git-upload-pack"
+          }
+        },
+        {
+          "allow": {
+            "method": "POST",
+            "path": "/nickdirienzo/paddock.git/git-receive-pack"
+          }
+        }
+      ]
+    }
+  ],
+  "binaries": [
+    "/usr/bin/gh",
+    "/usr/bin/git"
+  ]
+}

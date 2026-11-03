@@ -127,7 +127,7 @@ printf '%s' "$PADDOCK_TASK_ID" > identity
 printf '%s' "$$" > agent-pid
 for argument; do prompt=$argument; done
 case "$prompt" in
-  parent*) `+quote(exe)+` delegate --agent `+childAgent+` --terminal `+quote(backend)+` 'child task' --json > child.json ;;
+  parent*) `+quote(exe)+` delegate --runtime host --agent `+childAgent+` --terminal `+quote(backend)+` 'child task' --json > child.json ;;
 esac
 printf ready > ready
 while [ ! -f finish ]; do sleep 0.1; done
@@ -137,7 +137,7 @@ exit 0
 	t.Setenv("PADDOCK_CLAUDE_BIN", agent)
 	before := gitTest(t, repo, "status", "--porcelain=v1")
 	head := gitTest(t, repo, "rev-parse", "HEAD")
-	c := exec.Command(exe, "run", "parent task", "--agent", "codex", "--terminal", backend, "--repo", repoArgument, "--json")
+	c := exec.Command(exe, "run", "parent task", "--runtime", "host", "--agent", "codex", "--terminal", backend, "--repo", repoArgument, "--json")
 	c.Dir = t.TempDir() // Launch from outside any repository, as with a home directory.
 	c.Env = append(os.Environ(), "PADDOCK_HOME="+s.Home)
 	b, e := c.CombinedOutput()

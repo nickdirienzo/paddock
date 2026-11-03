@@ -4,6 +4,13 @@ Paddock runs local coding tasks in Git worktrees and persistent terminals. Use t
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.
 
+New tasks default to OpenShell. `--runtime host` is an explicit opt-out; missing
+OpenShell setup must not trigger a host fallback. See `paddock runtime --help`.
+Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
+and watches, and its CLI is not exposed in the sandbox. The host poller discovers
+PRs for the task's exact branch when approved `watch_authors` are configured.
+Run the following coordination commands on the host, not through a sandbox escape.
+
 ## Find your context
 
 When `PADDOCK_TASK_ID` is set, you already own a Paddock task. Work in its current
@@ -113,7 +120,7 @@ paddock github stop                 # stop service; retain all watches
 ```
 
 Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
-comments for resumable Codex tasks wake the same saved conversation and worktree.
+comments for resumable Codex and OpenShell Claude tasks wake the same saved conversation and worktree.
 Tasks without a saved conversation ID remain offline, with comments pending and no
 eyes reaction; use `paddock resume TASK_ID` to recover the identity when possible. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
 or register a watch again; there is no automatic login service yet.
@@ -141,8 +148,10 @@ its owning task. No mention or command prefix is required. Interpret each commen
 context; discussion or thanks may require no work. The poller adds 👀 after confirmed
 session delivery, independently of agent reasoning. This means queued, not completed.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
-and authorized authors trigger delivery. Incoming PR message delivery currently supports
-Codex; Claude can run ordinary tasks but cannot receive this GitHub message adapter.
+and authorized authors trigger delivery. Incoming PR message delivery supports
+Codex and OpenShell Claude tasks. Host Claude tasks have no native delivery adapter.
+Claude applies its own peer-message admission and tool approvals; held or uncertain
+deliveries require inspection, never terminal typing or blind retries.
 
 Paddock does not automatically commit, push, create PRs, or merge. Those actions follow
 the user's requested workflow and repository conventions; installing this skill does

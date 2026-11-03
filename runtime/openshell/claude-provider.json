@@ -1,0 +1,47 @@
+{
+  "id": "paddock-claude",
+  "display_name": "Paddock Claude OAuth",
+  "category": "agent",
+  "inference_capable": true,
+  "credentials": [
+    {
+      "name": "access_token",
+      "env_vars": [
+        "CLAUDE_CODE_OAUTH_TOKEN"
+      ],
+      "required": true,
+      "auth_style": "bearer",
+      "header_name": "authorization",
+      "refresh": {
+        "strategy": "oauth2_refresh_token",
+        "token_url": "https://platform.claude.com/v1/oauth/token",
+        "refresh_before_seconds": 300,
+        "max_lifetime_seconds": 3600,
+        "material": [
+          {
+            "name": "client_id",
+            "required": true
+          },
+          {
+            "name": "refresh_token",
+            "required": true,
+            "secret": true
+          }
+        ]
+      }
+    }
+  ],
+  "endpoints": [
+    {
+      "host": "api.anthropic.com",
+      "port": 443,
+      "protocol": "rest",
+      "access": "read-write",
+      "enforcement": "enforce"
+    }
+  ],
+  "binaries": [
+    "/usr/local/bin/claude",
+    "/usr/local/lib/node_modules/@anthropic-ai/**"
+  ]
+}
