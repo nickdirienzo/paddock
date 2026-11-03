@@ -13,6 +13,7 @@ import (
 
 type fakeGitHub struct {
 	pr             PullRequest
+	prsByRepo      map[string]PullRequest
 	comments       []GitHubComment
 	replies        []GitHubComment
 	failReply      bool
@@ -23,8 +24,13 @@ type fakeGitHub struct {
 	userLookups    []string
 }
 
-func (f *fakeGitHub) ValidateIdentity(context.Context) error                 { return nil }
-func (f *fakeGitHub) Pull(context.Context, string, int) (PullRequest, error) { return f.pr, nil }
+func (f *fakeGitHub) ValidateIdentity(context.Context) error { return nil }
+func (f *fakeGitHub) Pull(_ context.Context, repo string, _ int) (PullRequest, error) {
+	if pr, ok := f.prsByRepo[repo]; ok {
+		return pr, nil
+	}
+	return f.pr, nil
+}
 func (f *fakeGitHub) UserID(_ context.Context, login string) (int64, error) {
 	f.userLookups = append(f.userLookups, login)
 	return 7, nil

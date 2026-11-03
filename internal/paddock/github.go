@@ -233,9 +233,6 @@ func (g GitHubCoordinator) Poll(ctx context.Context) ([]GitHubEvent, error) {
 func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key string) ([]GitHubEvent, error) {
 	processed := []GitHubEvent{}
 	w := state.Watches[key]
-	if w.Routing != "planner" && !g.Service.CanDeliver(ctx, w.TaskID) {
-		return processed, nil // Leave comments unclaimed until this registered agent is available.
-	}
 	api, binding, err := g.remoteFor(state, w.Repo, nil)
 	if err != nil {
 		return processed, err
@@ -247,11 +244,21 @@ func (g GitHubCoordinator) pollWatch(ctx context.Context, state GitHubState, key
 	if err != nil {
 		return processed, err
 	}
+	if pr.Head.Ref != w.HeadRef || !strings.EqualFold(pr.Head.Repo.FullName, w.HeadRepo) || !strings.EqualFold(pr.Base.Repo.FullName, w.Repo) {
+		return processed, fmt.Errorf("PR ownership changed for %s; update its watch explicitly", key)
+	}
+	if pr.Merged {
+		task, err := g.Service.Store.Get(w.TaskID)
+		if err != nil {
+			return processed, err
+		}
+		return processed, markRexSessionMerged(ctx, task.Session)
+	}
 	if pr.State != "open" {
 		return processed, nil
 	}
-	if pr.Head.Ref != w.HeadRef || !strings.EqualFold(pr.Head.Repo.FullName, w.HeadRepo) || !strings.EqualFold(pr.Base.Repo.FullName, w.Repo) {
-		return processed, fmt.Errorf("PR ownership changed for %s; update its watch explicitly", key)
+	if w.Routing != "planner" && !g.Service.CanDeliver(ctx, w.TaskID) {
+		return processed, nil // Leave comments unclaimed until this registered agent is available.
 	}
 	comments, err := api.Comments(ctx, w.Repo, w.Number)
 	if err != nil {

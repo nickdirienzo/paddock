@@ -172,6 +172,13 @@ paddock github status --json
 paddock github stop                 # all registrations remain saved
 ```
 
+For watched PRs, the poller appends ` ✓ merged` to an existing Rex session label
+after GitHub confirms a merge, including when the agent is offline. It preserves
+the current label and does not add the suffix twice. Closing a PR without merging
+does not add it. Closed Rex sessions are not recreated; agents, native conversations,
+and workspace retention are unaffected. Label update failures appear in the poller's
+error status and are retried on later polls.
+
 Status includes `poller.running` (checked against the process lock), PID, mode, interval,
 last poll time/error, and log path. `watch_sessions` reports `online`, `resumable`, `offline`,
 `unknown`, `missing`, or `unsupported` for each PR's task. A running service may still
