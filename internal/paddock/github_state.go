@@ -160,7 +160,7 @@ func (s *Store) claimGitHub(event GitHubEvent) (bool, error) {
 	return claimed, err
 }
 func authorizedGitHub(w GitHubWatch, c GitHubComment) bool {
-	if c.User.Type != "User" || c.User.ID < 1 {
+	if (c.User.Type != "User" && c.User.Type != "Bot") || c.User.ID < 1 {
 		return false
 	}
 	if w.AllowAnyUser {
@@ -174,8 +174,14 @@ func authorizedGitHub(w GitHubWatch, c GitHubComment) bool {
 	return false
 }
 
-// A wildcard is an explicit watch policy, never a GitHub login or a snapshot
-// of repository collaborators. An empty runtime list disables auto-discovery.
+func paddockGeneratedGitHub(identity GitHubIdentityBinding, c GitHubComment) bool {
+	return strings.Contains(c.Body, "<!-- paddock:") || (identity.Mode == "app" && strings.EqualFold(c.User.Login, identity.Login))
+}
+
+// A wildcard is an explicit watch policy for every GitHub user or bot, never a
+// login or a snapshot of repository collaborators. Paddock's own App identity
+// and marked replies are filtered separately. An empty runtime list disables
+// auto-discovery.
 func validateWatchAuthors(authors []string) error {
 	for _, author := range authors {
 		login := strings.TrimSpace(author)
@@ -185,8 +191,8 @@ func validateWatchAuthors(authors []string) error {
 			}
 			continue
 		}
-		if !githubLogin.MatchString(login) || strings.Contains(login, "[bot]") {
-			return fmt.Errorf("--allow requires GitHub user logins or '*' for any user")
+		if !githubLogin.MatchString(login) {
+			return fmt.Errorf("--allow requires GitHub account logins or '*' for any account")
 		}
 	}
 	return nil

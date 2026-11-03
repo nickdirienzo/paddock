@@ -17,7 +17,7 @@ func (g GitHubCoordinator) claimReview(w GitHubWatch, event GitHubEvent, comment
 		if !ok || current.TaskID != w.TaskID {
 			return fmt.Errorf("PR watch changed before review delivery")
 		}
-		allowed := authorizedGitHub(current, event.Comment) && !strings.Contains(event.Comment.Body, "<!-- paddock:") && !(event.Identity.Mode == "app" && strings.EqualFold(event.Comment.User.Login, event.Identity.Login))
+		allowed := authorizedGitHub(current, event.Comment) && !paddockGeneratedGitHub(event.Identity, event.Comment)
 		if allowed {
 			for _, c := range comments {
 				if c.Kind != "review" || c.ReviewID != event.Comment.ID || c.InReplyTo != 0 || c.User.ID != event.Comment.User.ID || !authorizedGitHub(current, c) || strings.TrimSpace(c.Body) == "" || strings.Contains(c.Body, "<!-- paddock:") {
@@ -34,7 +34,11 @@ func (g GitHubCoordinator) claimReview(w GitHubWatch, event GitHubEvent, comment
 				event.Plan = PlanRequest(Request{Body: "Submitted review with inline comments"})
 			}
 		} else {
-			event.Plan = Plan{Action: "ignore", Reason: "review author is not authorized"}
+			reason := "review author is not authorized"
+			if paddockGeneratedGitHub(event.Identity, event.Comment) {
+				reason = "Paddock-generated review"
+			}
+			event.Plan = Plan{Action: "ignore", Reason: reason}
 		}
 		event.Status, event.UpdatedAt = "claimed", now()
 		state.Events[event.ID] = event

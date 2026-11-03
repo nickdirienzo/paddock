@@ -145,18 +145,19 @@ to change allowed engineers. Only comments created after registration are consid
 Edited comments retain their event identity and are not executed again; post a new
 comment to request another action.
 
-To accept comments from **any GitHub user**, including future users, opt in explicitly:
+To accept comments from **any GitHub account**, including future users and review bots, opt in explicitly:
 
 ```sh
 paddock github watch https://github.com/your-team/project/pull/123 \
   --task TASK_ID --allow '*'
 ```
 
-Quote the wildcard so your shell does not expand it. This permits any human account
-that can comment on that PR, including non-collaborators on public repositories.
-It is not a snapshot of the collaborator list. Bot accounts and Paddock-generated
-replies remain excluded. The wildcard must be used alone. Existing watches remain
-restricted until you update them; re-run `watch` with named accounts to narrow access.
+Quote the wildcard so your shell does not expand it. This permits any user or bot
+that can comment on that PR, including non-collaborators on public repositories and
+external reviewers such as Claude or Copilot. It is not a snapshot of the collaborator
+list. Paddock's own App identity and Paddock-marked replies remain excluded to prevent
+loops. The wildcard must be used alone. Existing watches remain restricted until you
+update them; re-run `watch` with named user or bot accounts to narrow access.
 Status exposes this policy as `allow_any_user: true`.
 After upgrading, restart any running poller with the upgraded CLI's `github stop`
 and `github start` commands before registering wildcard watches. Registration
@@ -210,8 +211,8 @@ Inline requests include the original file and line context.
 With default direct routing, every new, nonempty comment from an approved author on a watched PR is queued to
 that PR's existing task session. No mention, command prefix, keyword, or LLM routing
 step is needed. `tests are failing`, questions, and ordinary discussion all reach the
-same agent, which interprets them in context. Bot accounts and Paddock-generated
-comments are excluded before delivery.
+same agent, which interprets them in context. Authorized external bot reviews are
+delivered. Paddock's own App identity and marked comments are excluded before delivery.
 
 Mentions and old `paddock:` command-like text are passed through as comment text.
 The poller does not create child tasks, answer status questions, or execute instructions
@@ -247,7 +248,8 @@ repository's mapped GitHub identity. In App mode, replies from a task process
 (`PADDOCK_TASK_ID` set) are queued automatically without reading the key. The next
 `paddock github poll` publishes them; the shared background poller drains them regularly.
 Engineers can use `--queue` explicitly, or omit it to post synchronously. A queued reply
-prints its status rather than claiming a GitHub URL before publication. Bot accounts and Paddock-marked comments never trigger work.
+prints its status rather than claiming a GitHub URL before publication. Paddock's own
+App account and Paddock-marked comments never trigger work.
 In development mode, the same account can write human comments and Paddock replies;
 the marker distinguishes outgoing replies without ignoring all of the developer's input.
 

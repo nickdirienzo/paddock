@@ -180,20 +180,23 @@ func TestGitHubAppFreeformDelivery(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bot := testComment(3, "@mozziebot tests are failing", 7)
-	bot.User.Type = "Bot"
+	self := testComment(3, "@mozziebot tests are failing", 7)
+	self.User.Login, self.User.Type = "mozziebot[bot]", "Bot"
+	externalBot := testComment(5, "Automated review found a regression.", 7)
+	externalBot.User.Login, externalBot.User.Type = "claude[bot]", "Bot"
 	remote.comments = []GitHubComment{
 		testComment(1, "tests are failing", 7),
 		testComment(2, "@mozziebot tests are failing", 99),
-		bot,
+		self,
 		testComment(4, " \n", 7),
+		externalBot,
 	}
 	events, err := g.Poll(context.Background())
-	if err != nil || len(events) != 4 {
+	if err != nil || len(events) != 5 {
 		t.Fatalf("poll: %v %+v", err, events)
 	}
 	for _, event := range events {
-		if event.Comment.ID == 1 {
+		if event.Comment.ID == 1 || event.Comment.ID == 5 {
 			if event.Status != "done" || event.Plan.Action != "message" {
 				t.Fatal(event)
 			}
@@ -205,8 +208,8 @@ func TestGitHubAppFreeformDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(log)
-	if err != nil || strings.Count(string(b), "queue --thread") != 1 || !strings.Contains(string(b), "tests are failing") {
-		t.Fatalf("expected one native message: %s %v", b, err)
+	if err != nil || strings.Count(string(b), "queue --thread") != 2 || !strings.Contains(string(b), "tests are failing") || !strings.Contains(string(b), externalBot.Body) {
+		t.Fatalf("expected human and external bot messages: %s %v", b, err)
 	}
 }
 func TestGitHubCrashClaimNeverReplays(t *testing.T) {
@@ -232,10 +235,10 @@ func TestGitHubCrashClaimNeverReplays(t *testing.T) {
 func TestGitHubPolicyAndOwnership(t *testing.T) {
 	g, remote, s, w, _ := githubFixture(t)
 	c := testComment(1, "Please fix this", 7)
-	c.User.Type = "Bot"
+	c.User.Login, c.User.Type = "claude[bot]", "Bot"
 	remote.comments = []GitHubComment{c}
 	events, err := g.Poll(context.Background())
-	if err != nil || len(events) != 1 || events[0].Plan.Action != "ignore" {
+	if err != nil || len(events) != 1 || events[0].Plan.Action != "message" {
 		t.Fatal(events, err)
 	}
 	remote.pr.Head.Ref = "different-owner"

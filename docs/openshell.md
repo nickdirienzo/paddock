@@ -117,10 +117,11 @@ the expiry and last renewal error. After upgrading an older running poller, rest
 it with `paddock github stop` followed by `paddock github start`.
 
 With `--allow`, the host poller discovers an open PR by the task's exact repository
-and branch and registers the existing watch mechanism. Only the configured engineer
-logins can issue instructions. Use `--allow '*'` to accept any GitHub user who can
-comment, including future users; bot comments remain excluded. This sets the policy
-for newly created tasks and discovered watches, without widening existing watches.
+and branch and registers the existing watch mechanism. Only the configured account
+logins can issue instructions. Use `--allow '*'` to accept any GitHub user or bot that
+can comment, including future accounts and external review bots. Paddock's own App
+identity and marked replies remain excluded. This sets the policy for newly created
+tasks and discovered watches, without widening existing watches.
 Without this option, register a watch explicitly
 from the host. Sandboxed agents use ordinary `gh` for PRs/replies; the host owns task
 coordination. `paddock message TASK 'instructions'` uses the agent's native inbox inside

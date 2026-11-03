@@ -155,7 +155,7 @@ func (o Orchestrator) authorize(signal Signal, policy OrchestrationPolicy) error
 				return err
 			}
 		}
-		if !ok || w.TaskID != signal.TaskID || e.TaskID != signal.TaskID || body != signal.Body || !authorizedGitHub(w, e.Comment) || e.Comment.User.Type == "Bot" || strings.Contains(e.Comment.Body, "<!-- paddock:") {
+		if !ok || w.TaskID != signal.TaskID || e.TaskID != signal.TaskID || body != signal.Body || !authorizedGitHub(w, e.Comment) || paddockGeneratedGitHub(e.Identity, e.Comment) {
 			return fmt.Errorf("GitHub signal is no longer authorized")
 		}
 		expected := w.Orchestration

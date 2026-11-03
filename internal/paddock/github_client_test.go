@@ -178,3 +178,30 @@ func TestGitHubReviewSubmissionSnapshot(t *testing.T) {
 		t.Fatal(paths, comments)
 	}
 }
+
+func TestGitHubUserIDAllowsUsersAndBots(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/users/engineer":
+			fmt.Fprint(w, `{"id":7,"type":"User"}`)
+		case "/users/claude[bot]":
+			fmt.Fprint(w, `{"id":8,"type":"Bot"}`)
+		case "/users/team":
+			fmt.Fprint(w, `{"id":9,"type":"Organization"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	api := NewGitHubAPI(GitHubIdentity{Mode: "app", App: &GitHubAppConfig{AppID: 42, InstallationID: 99}})
+	api.app.baseURL, api.app.token, api.app.expires = server.URL, "fixture-token", time.Now().Add(time.Hour)
+	for login, expected := range map[string]int64{"engineer": 7, "claude[bot]": 8} {
+		id, err := api.UserID(context.Background(), login)
+		if err != nil || id != expected {
+			t.Fatalf("%s: id=%d err=%v", login, id, err)
+		}
+	}
+	if _, err := api.UserID(context.Background(), "team"); err == nil || !strings.Contains(err.Error(), "user or bot") {
+		t.Fatalf("organization was authorized: %v", err)
+	}
+}
