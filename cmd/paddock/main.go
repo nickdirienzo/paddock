@@ -22,7 +22,8 @@ const help = `Paddock — a local control plane for coding agents
   paddock message <id> "message"
   paddock tasks [--json]
   paddock show <id> [--json]
-  paddock attach <id> [--client Rex-client-id]
+  paddock attach [<id>] [--client Rex-client-id]
+  paddock shell-setup <id>
   paddock resume <id> [--json] [--detach] [--client Rex-client-id]
   paddock runtime show|configure|check|default
   paddock gc [--apply] [--json]
@@ -39,7 +40,7 @@ const help = `Paddock — a local control plane for coding agents
 
 Delegate inherits the parent from PADDOCK_TASK_ID when --parent is omitted.
 Task IDs accept unique prefixes. State: PADDOCK_HOME or ~/.local/state/paddock.
-Rex attach selects a session in a connected Rex app. Screen attaches here.
+Bare attach opens a host shell tab. Attach with an ID reconnects to that agent.
 Run opens its Rex session automatically; --detach or --json keeps it in the background.
 --repo accepts a registered name, a working-tree path, or a bare-repository path.
 Use - to read a multiline prompt from stdin until EOF, or --prompt-file to read a file.
@@ -220,6 +221,9 @@ func run(args []string, out io.Writer) error {
 	if command == "repo" {
 		return runRepo(args[1:], out)
 	}
+	if command == "shell-setup" {
+		return runShellSetup(args[1:], out)
+	}
 	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime json detach client", "delegate": "prompt-file agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
 	flags, ok := allowed[command]
 	if !ok {
@@ -232,6 +236,10 @@ func run(args []string, out io.Writer) error {
 	if o["help"] != "" {
 		fmt.Fprint(out, help)
 		return nil
+	}
+	if command == "attach" && len(pos) == 0 {
+		_, err := (paddock.Service{}).OpenHostShell(context.Background(), nil, o["client"])
+		return err
 	}
 	prompt := ""
 	if command == "run" || command == "delegate" {

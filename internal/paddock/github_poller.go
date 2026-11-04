@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 3 // v3 authorizes user and bot accounts while filtering Paddock's own identity.
+const githubPollerVersion = 5 // v5 handles sandbox requests for host shell tabs.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -248,6 +248,9 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 			}
 		}
 	}()
+	shelled := make(chan struct{})
+	go func() { defer close(shelled); g.Service.RunShellRequests(ctx) }()
+	defer func() { cancel(); <-shelled }()
 	renewed := make(chan struct{})
 	go func() {
 		defer close(renewed)

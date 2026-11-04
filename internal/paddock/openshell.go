@@ -149,7 +149,7 @@ func sandboxExec(ctx context.Context, t Task, tty bool, args ...string) *exec.Cm
 	} else {
 		flags = append(flags, "--no-tty")
 	}
-	for _, v := range []string{"TERM=xterm-256color", "HOME=/home/sandbox", "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME=/home/sandbox/.codex", "CLAUDE_CONFIG_DIR=/home/sandbox/.claude", "PADDOCK_TASK_ID=" + t.ID, "GOCACHE=/sandbox/go-cache", "GOPATH=/sandbox/go-path"} {
+	for _, v := range []string{"TERM=xterm-256color", "HOME=/home/sandbox", "PATH=/sandbox/.paddock/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME=/home/sandbox/.codex", "CLAUDE_CONFIG_DIR=/home/sandbox/.claude", "PADDOCK_TASK_ID=" + t.ID, "GOCACHE=/sandbox/go-cache", "GOPATH=/sandbox/go-path"} {
 		flags = append(flags, "--env", v)
 	}
 	if t.OpenShell.Config.CodexAccountID != "" {
@@ -447,6 +447,9 @@ mkdir -p /home/sandbox/.codex /home/sandbox/.claude
 	}
 	if _, e = sandboxOutput(ctx, *t, t.Session.AgentPath, "--version"); e != nil {
 		return fmt.Errorf("sandbox image must provide %s: %w", t.Session.AgentPath, e)
+	}
+	if e = installHostShellShortcut(ctx, *t); e != nil {
+		return fmt.Errorf("install host shell shortcut: %w", e)
 	}
 	t.OpenShell.Ready = true
 	return nil

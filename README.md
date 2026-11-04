@@ -214,16 +214,49 @@ There is no assumed `rex attach` or `rex resume` command. Reconnecting selects t
 
 The selected agent owns the terminal's foreground process group. Rex sees `codex` or `claude` as the foreground process for its native agent UI, while Paddock waits in the background and records the agent's exit.
 
-If multiple Rex apps are connected, select one:
+When invoked inside Rex, Paddock uses the app that owns the invoking terminal
+pane, even if multiple apps are connected. To select another app explicitly:
 
 ```sh
 rex client ls --json
 paddock attach <id> --client <client-id>
 ```
 
-`paddock run --client <id> "prompt"` targets a particular app for automatic display; `REX_CLIENT` also applies. Without either, Paddock selects the sole connected app.
+`paddock run --client <id> "prompt"` targets a particular app for automatic display;
+`REX_CLIENT` also applies. Selection prefers `--client`, then `REX_CLIENT`, then
+the invoking pane's connected app. If the invoking pane cannot be resolved,
+Paddock selects the sole connected app or asks for `--client` when ambiguous.
 
 The selected app must allow **Remote Control** in **Settings → Rex Server**. When disabled, Paddock reports the rejection and an attach command; the created task continues independently. A display failure does not turn a successful launch into a failed command. Creating sessions and inspecting processes do not require this app setting. If no app is connected, open Rex before attaching.
+
+Bare `paddock attach` opens a host shell in a new Rex tab. From Claude Code or
+Codex's shell-command mode, use `! paddock attach`. Supplying a task ID retains
+the existing behavior of reconnecting to that agent.
+
+OpenShell tasks have a small task-scoped `paddock attach` shortcut. It asks the
+host's shared Paddock process to open a shell tab on the Rex app viewing that
+task. The shell runs on the host Mac directly in the sandbox's live worktree,
+using OrbStack's existing container file share, with `PADDOCK_TASK_ID` set.
+Inspect files with macOS tools immediately; agent updates appear in place:
+
+```sh
+open doc/features/mira-architecture-convergence.md
+```
+
+The inspection shell ignores sandbox project configuration during host mise
+activation, so browsing artifacts does not require trusting that configuration.
+
+Host inspection of OpenShell files currently requires a local OrbStack Docker
+runtime with its container share available under `~/OrbStack/docker/containers`.
+Paddock resolves the workload container by its sandbox ID, name, workspace, and
+role labels. If that live view is unavailable, it reports the error before
+opening a tab. Set `PADDOCK_DOCKER_BIN` if Docker is not on PATH.
+
+The shortcut is installed for new tasks and active tasks by the shared host
+process. `paddock shell-setup <id>` installs it explicitly. After an upgrade,
+restart an older shared process with `paddock github stop` and
+`paddock github start`. The sandbox shortcut supports only opening its own host
+shell; no host command, path, or client selection is accepted from the sandbox.
 
 Paddock looks for `rex` on PATH, then the standard Rex/Rex Beta app-bundle locations on macOS. Set `PADDOCK_REX_BIN` for another location. This adapter uses Rex's CLI, not its private sockets directly. See the [Rex documentation](https://www.superlogical.com/rex/docs) and `rex __internal skill` for the installed version's contract.
 
