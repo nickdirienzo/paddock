@@ -308,10 +308,18 @@ func (t terminal) Attach(ctx context.Context, task Task, client string) error {
 	if client == "" {
 		client = os.Getenv("REX_CLIENT")
 	}
+	client, err := t.rexClient(ctx, client, os.Getenv("REX_SESSION"), os.Getenv("REX_BLOCK"))
+	if err != nil {
+		return err
+	}
+	return t.selectRexSession(ctx, s, client)
+}
+
+func (t terminal) rexClient(ctx context.Context, client, session, block string) (string, error) {
 	if client == "" {
 		b, err := t.rex(ctx, "client", "ls", "--json")
 		if err != nil {
-			return err
+			return "", err
 		}
 		var v struct {
 			Clients []struct {
@@ -324,7 +332,7 @@ func (t terminal) Attach(ctx context.Context, task Task, client string) error {
 			} `json:"clients"`
 		}
 		if err = json.Unmarshal(b, &v); err != nil {
-			return err
+			return "", err
 		}
 		var choices []string
 		for _, c := range v.Clients {
@@ -334,9 +342,24 @@ func (t terminal) Attach(ctx context.Context, task Task, client string) error {
 			}
 		}
 		if len(choices) != 1 {
-			return fmt.Errorf("choose a connected Rex app with --client <id>; available: %s", strings.Join(choices, ", "))
+			client = ""
+			if owner := t.paneRexClient(ctx, session, block); owner != "" {
+				for _, c := range v.Clients {
+					if c.ID == owner && c.Info.Kind == "app" && c.State == "connected" {
+						client = owner
+						break
+					}
+				}
+			}
+			if client == "" {
+				return "", fmt.Errorf("choose a connected Rex app with --client <id>; available: %s", strings.Join(choices, ", "))
+			}
 		}
 	}
+	return client, nil
+}
+
+func (t terminal) selectRexSession(ctx context.Context, s Session, client string) error {
 	b, err := t.rex(ctx, "-C", client, "actions", "--json")
 	if err != nil {
 		return err
@@ -367,4 +390,37 @@ func (t terminal) Attach(ctx context.Context, task Task, client string) error {
 		return fmt.Errorf("%w; enable Remote Control in Rex Settings > Rex Server, or open session %s manually", err, s.ID)
 	}
 	return nil
+}
+
+// The invoking pane's owner identifies the app to display the task in, even
+// when several apps are connected to the same server. Use the caller's pane,
+// not the task's pane: the task may currently be displayed on another device.
+// Inherited Rex IDs may be stale; failed inspection leaves client selection
+// to the existing explicit/sole-client rules.
+func (t terminal) invokingRexClient(ctx context.Context) string {
+	return t.paneRexClient(ctx, os.Getenv("REX_SESSION"), os.Getenv("REX_BLOCK"))
+}
+
+func (t terminal) paneRexClient(ctx context.Context, session, block string) string {
+	if block == "" {
+		return ""
+	}
+	args := []string{"block", "inspect", block, "--json"}
+	if session != "" {
+		args = append(args, "-s", session)
+	}
+	b, err := t.rex(ctx, args...)
+	if err != nil {
+		return ""
+	}
+	var v struct {
+		Block struct {
+			ID    string `json:"block_id"`
+			Owner string `json:"owner"`
+		} `json:"block"`
+	}
+	if json.Unmarshal(b, &v) != nil || v.Block.ID != block {
+		return ""
+	}
+	return v.Block.Owner
 }

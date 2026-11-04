@@ -11,6 +11,12 @@ See `paddock runtime --help`.
 Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
 and watches, and its CLI is not exposed in the sandbox. The host poller discovers
 PRs for the task's exact branch when approved `watch_authors` are configured.
+The sandbox's narrow `paddock attach` shortcut is an exception: it requests a
+host shell tab for this task, without exposing the host CLI or credentials.
+From the agent's shell-command mode use `! paddock attach`; in the resulting
+host shell, the sandbox's live worktree is already visible through OrbStack,
+so use `open <path>` or other Mac tools directly. Supplying a task ID to host `paddock attach`
+still reconnects to that task's existing agent.
 Run the following coordination commands on the host, not through a sandbox escape.
 
 ## Find your context
