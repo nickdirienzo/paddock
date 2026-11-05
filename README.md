@@ -54,6 +54,22 @@ New tasks run in OpenShell by default. Follow the [OpenShell setup
 guide](docs/openshell.md) to configure the sandbox, agent authentication, and
 GitHub access before starting a task.
 
+The default OpenShell runtime requires a GitHub App installed on each repository
+you want agents to work in, with these **Repository permissions**:
+
+| Permission | Access | Used for |
+| --- | --- | --- |
+| Contents | Read and write | Clone repositories and push task branches. |
+| Pull requests | Read and write | Create and update PRs, read reviews, and reply to review threads. |
+| Issues | Read and write | Post PR conversation comments and reactions. |
+| Metadata | Read-only (included automatically) | Read repository metadata. |
+
+If you already installed the App, update its **Permissions & events** settings
+to match this list, then approve the new permissions for each
+installation. Saving the App settings alone does not update existing
+installations. See [GitHub App setup](docs/github.md#configure-a-github-app) for
+the App ID, private key, installation, and repository routing steps.
+
 You can also use agents already installed and logged in on your Mac:
 
 ```sh

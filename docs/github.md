@@ -14,11 +14,17 @@ Task ownership, authorized requesters, and the selected coding agent remain inde
 
 1. In your personal or organization settings, open **Developer settings → GitHub Apps →
    New GitHub App**. Choose the account that should own and administer the App.
-2. Grant **Pull requests: Read and write** and **Issues: Read and write**. GitHub
-   includes **Metadata: Read-only**. Pull requests permission covers PR comments and
-   inline review reactions; GitHub documents Issues write permission for reactions to
+2. Under **Repository permissions**, grant **Contents: Read and write**,
+   **Pull requests: Read and write**, and **Issues: Read and write**. GitHub
+   includes **Metadata: Read-only**. Contents write is required by the default
+   OpenShell runtime so agents can clone repositories and push task branches.
+   Pull requests permission covers PR comments and inline review reactions;
+   GitHub documents Issues write permission for reactions to
    conversation comments. See [GitHub's reaction permissions](https://docs.github.com/en/rest/reactions/reactions#create-reaction-for-an-issue-comment).
-   Existing installations must accept added permissions before those reactions work.
+   When updating an existing App, save the changes under **Permissions & events**
+   and approve the new permissions for **each installation**. The added permissions
+   do not take effect until the installing account approves them; see
+   [GitHub's permission update instructions](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration#changing-the-permissions-of-a-github-app).
    No organization permissions are needed.
 3. Disable **Active** under Webhook. Leave OAuth callbacks and user authorization disabled.
    Choose **Any account** if the App needs installation outside its owning account.
@@ -38,9 +44,11 @@ paddock github route 'your-login/*' --identity personal
 Authentication verifies the App and installation against GitHub, derives the bot login,
 and mints an installation token. An optional `--login 'your-app[bot]'` asserts the expected
 principal. Paddock signs JWTs and manages tokens itself; App mode does not require `gh`.
-All polling and reply API calls use the selected App installation. Future PR creation
-can use this same transport; Paddock does not yet create PRs. Pushing Git refs under the
-App would additionally require Contents write permission and a Git credential integration.
+All polling and reply API calls use the selected App installation. In OpenShell,
+agents also use ordinary `git` and `gh` to push branches, create PRs, and reply as
+the mapped App bot. Paddock requests a task token restricted to its repository
+with Contents, Pull requests, and Issues write permissions; the host retains the
+App private key. See [OpenShell identity and messages](openshell.md#identity-and-messages).
 
 ### Map personal and team repositories
 
