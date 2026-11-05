@@ -14,9 +14,10 @@ import (
 var aliasName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 type repoAliases struct {
-	Version             int               `json:"version"`
-	Repositories        map[string]string `json:"repositories"`
-	TrustedRepositories []string          `json:"trusted_repositories,omitempty"`
+	Version             int                            `json:"version"`
+	Repositories        map[string]string              `json:"repositories"`
+	TrustedRepositories []string                       `json:"trusted_repositories,omitempty"`
+	TrustedMCPs         map[string]map[string]MCPTrust `json:"trusted_mcps,omitempty"`
 }
 
 // Readers see complete snapshots because writers replace the file atomically.
@@ -131,6 +132,8 @@ func (s *Store) SetRepoTrust(ctx context.Context, nameOrPath string, trusted boo
 		data.TrustedRepositories = slices.DeleteFunc(data.TrustedRepositories, func(path string) bool { return path == repo.CommonDir })
 		if trusted {
 			data.TrustedRepositories = append(data.TrustedRepositories, repo.CommonDir)
+		} else {
+			delete(data.TrustedMCPs, repo.CommonDir)
 		}
 		return writeJSONAtomic(filepath.Join(s.Home, "repos.json"), data)
 	})

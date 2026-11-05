@@ -121,6 +121,16 @@ For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_l
 
 Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in Codex.
 
+To grant OpenShell tasks access to selected host MCP connections, use
+`paddock repo trust project --mcp observe,metabase`. This grants project trust
+and access to those named HTTPS MCP servers using host Codex's existing login
+and network. MCP grants are additive; ordinary project trust grants none.
+Use `paddock repo untrust project --mcp metabase` to revoke one server, or
+`paddock repo untrust project` to revoke all grants along with project trust.
+Revocation blocks new requests immediately. Exit and resume the agent to load
+new grants. See [trusted MCP connections](openshell.md#trusted-mcp-connections)
+for authentication, scope, and configuration-change behavior.
+
 ### Remembering Codex hook decisions
 
 For repositories trusted with `paddock repo trust`, new Codex sessions reuse hook decisions you already saved in Codex. Approve hooks once through **Review hooks** or **Trust all and continue**; subsequent worktrees can reuse those approvals. Paddock reads your Codex `config.toml` at launch and passes matching decisions as invocation settings, without editing that file or adding `--dangerously-bypass-hook-trust`.

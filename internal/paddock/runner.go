@@ -126,6 +126,16 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 			fmt.Fprintln(os.Stderr, "Could not reuse Codex hook approvals; review hooks in Codex:", hookErr)
 		}
 	}
+	stopMCP := func() {}
+	if t.RuntimeName() == "openshell" {
+		stopMCP, err = startTrustedMCPBridge(store, t)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not configure trusted MCPs:", err)
+			_ = store.Finish(t.ID, 1, err.Error())
+			return 1
+		}
+		defer stopMCP()
+	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -177,6 +187,7 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	if restoreErr := restore(); restoreErr != nil {
 		fmt.Fprintln(os.Stderr, "could not restore terminal foreground:", restoreErr)
 	}
+	stopMCP()
 	if t.RuntimeName() == "openshell" {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		// A disconnected transport does not prove that the remote agent exited.

@@ -35,8 +35,8 @@ const help = `Paddock — a local control plane for coding agents
   paddock repo add <name> <path>
   paddock repo list [--json]
   paddock repo remove <name>
-  paddock repo trust <name-or-path>
-  paddock repo untrust <name-or-path>
+  paddock repo trust <name-or-path> [--mcp name,name]
+  paddock repo untrust <name-or-path> [--mcp name,name]
 
 Delegate inherits the parent from PADDOCK_TASK_ID when --parent is omitted.
 Task IDs accept unique prefixes. State: PADDOCK_HOME or ~/.local/state/paddock.
