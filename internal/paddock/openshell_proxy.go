@@ -10,8 +10,9 @@ import (
 )
 
 // Give the transport the selected agent's executable name for terminal process
-// discovery. It is byte-for-byte the pinned OpenShell client, never a host agent,
-// and is not added to PATH. A content-addressed copy survives tool upgrades.
+// discovery. The source is the pinned OpenShell client or Paddock's paste
+// transport, never a host coding agent. It is not added to PATH. A
+// content-addressed copy survives tool upgrades.
 func sandboxAgentProxy(home, binary, agent string) (string, error) {
 	if agent != "codex" && agent != "claude" {
 		return "", fmt.Errorf("invalid agent proxy name")

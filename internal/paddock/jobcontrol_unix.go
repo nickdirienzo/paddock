@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 func prepareAgentTerminal(c *exec.Cmd) (func() error, bool, error) {
@@ -26,6 +27,10 @@ func prepareAgentTerminal(c *exec.Cmd) (func() error, bool, error) {
 	if foreground != unix.Getpgrp() {
 		return noop, false, fmt.Errorf("Paddock supervisor must run in the terminal foreground")
 	}
+	state, err := term.GetState(fd)
+	if err != nil {
+		return noop, false, fmt.Errorf("inspect terminal settings: %w", err)
+	}
 	// Go performs setpgid and tcsetpgrp before exec, so the agent can read the
 	// terminal immediately and Rex sees the agent as the foreground leader.
 	c.SysProcAttr = &syscall.SysProcAttr{Foreground: true, Ctty: fd}
@@ -33,7 +38,10 @@ func prepareAgentTerminal(c *exec.Cmd) (func() error, bool, error) {
 		// The supervisor is in the background until it reclaims the terminal.
 		signal.Ignore(syscall.SIGTTOU)
 		defer signal.Reset(syscall.SIGTTOU)
-		return unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, foreground)
+		if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, foreground); err != nil {
+			return err
+		}
+		return term.Restore(fd, state)
 	}
 	return restore, true, nil
 }

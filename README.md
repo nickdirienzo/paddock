@@ -102,6 +102,9 @@ worktree. On a local OrbStack setup, files are already visible to Mac tools:
 open report.html
 ```
 
+Paste screenshots directly into sandboxed Codex or Claude. Paddock transfers
+the selected clipboard image into the task automatically.
+
 ## Keep the conversation on GitHub
 
 Once [GitHub is configured](docs/github.md), connect a PR to its task:

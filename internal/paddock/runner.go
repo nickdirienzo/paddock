@@ -137,6 +137,11 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		defer stopMCP()
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
+	if err = wrapClipboardCommand(t, store.Home, exe, c); err != nil {
+		fmt.Fprintln(os.Stderr, "Could not prepare image paste:", err)
+		_ = store.Finish(t.ID, 1, err.Error())
+		return 1
+	}
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
