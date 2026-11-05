@@ -97,6 +97,25 @@ for installation details.
 
 ## Use the CLI
 
+For an interactive task form, run `paddock new`. Choose a repository, agent, and runtime,
+write a multiline prompt, and select **Start task**. Registered repository names
+appear in the picker alongside the current project; **Other repository…** accepts
+a path or name. The runtime selector starts with your configured default; choose
+OpenShell or Host for this task without changing the saved default.
+
+To open that form directly from Rex, install the launcher once:
+
+```sh
+paddock rex setup
+rex config reload
+```
+
+Press **Option-Command-N**, or choose **New Paddock Task** in Rex's command palette.
+The form opens in a floating pane and closes after launching the task and selecting
+its session. Use Tab and Shift-Tab to move between fields, Enter to add prompt
+lines, and Escape or Ctrl-C to cancel. See the [launcher reference](docs/reference.md#interactive-task-launcher)
+for changing the shortcut or removing the integration.
+
 Start a task from any Git repository, or give `--repo` a path. Choose
 `--agent codex` or `--agent claude`. Longer prompts can come from a file:
 

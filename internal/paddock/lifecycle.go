@@ -114,6 +114,17 @@ func (s Service) Resume(ctx context.Context, id string) (Task, error) {
 	return s.resumeLocked(ctx, t.ID)
 }
 
+// This specific persisted error is emitted only when the MCP bridge fails
+// before AgentCommand runs. Missing history alone never permits replaying an
+// assignment: existing or previously resumed conversations still require their
+// native identity, even when their latest supervisor failed during MCP setup.
+func canRetryInitialMCPStartup(t Task) bool {
+	return t.RuntimeName() == "openshell" && t.Status == "failed" &&
+		t.Session.Generation > 0 && !t.Session.Resume && t.Session.ConversationID == "" &&
+		t.Session.ExitCode != nil && *t.Session.ExitCode == 1 &&
+		strings.HasPrefix(t.Error, "trusted MCP bridge requires host Codex:")
+}
+
 func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	t, err := s.Store.Get(id)
 	if err != nil {
@@ -140,12 +151,13 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		return t, err
 	}
 	release()
+	retryInitial := canRetryInitialMCPStartup(t)
 	if t.RuntimeName() == "openshell" {
 		if err = s.startTaskSandbox(ctx, &t); err != nil {
 			return t, err
 		}
 	}
-	if t.Session.ConversationID == "" {
+	if !retryInitial && t.Session.ConversationID == "" {
 		if t.Session.Agent != "codex" {
 			return t, fmt.Errorf("native conversation ID was not recorded; cannot safely resume")
 		}
@@ -159,8 +171,10 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		}
 	}
 	// Validate the persisted conversation before launching. Never silently fork.
-	if err = verifyConversation(ctx, t); err != nil {
-		return t, err
+	if !retryInitial {
+		if err = verifyConversation(ctx, t); err != nil {
+			return t, err
+		}
 	}
 	restored, err := restoreWorktree(ctx, t)
 	if err != nil {
@@ -181,7 +195,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	}
 	if err = s.Store.update(id, func(v *Task) error {
 		v.Session.Generation++
-		v.Session.Resume = true
+		v.Session.Resume = !retryInitial
 		v.Session.ResumeNotice = t.Session.ResumeNotice
 		if v.Session.Backend == "rex" && v.Session.ID != "" {
 			v.Session.GroupID = v.Session.ID

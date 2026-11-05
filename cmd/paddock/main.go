@@ -16,6 +16,8 @@ import (
 
 const help = `Paddock — a local control plane for coding agents
 
+  paddock new [--repo name-or-path] [--agent codex|claude] [--runtime openshell|host]
+  paddock rex setup|remove [--config path] [--key shortcut]
   paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
                            [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
@@ -197,6 +199,12 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "new" {
+		return runNew(args[1:], out)
+	}
+	if command == "rex" {
+		return runRex(args[1:], out)
+	}
 	if command == "runtime" {
 		return runRuntime(args[1:], out)
 	}
