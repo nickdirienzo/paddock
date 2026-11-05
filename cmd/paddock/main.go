@@ -224,7 +224,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime json detach client", "delegate": "prompt-file agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation"}
+	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime json detach client", "delegate": "prompt-file agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -299,7 +299,7 @@ func run(args []string, out io.Writer) error {
 	}
 	service := paddock.Service{Store: store, Executable: exe}
 	ctx := context.Background()
-	if command == "__run" {
+	if command == "__run" || command == "__paste" {
 		generation := 0
 		if o["generation"] != "" {
 			generation, err = strconv.Atoi(o["generation"])
@@ -307,7 +307,12 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("invalid supervisor generation")
 			}
 		}
-		code := paddock.RunAgentGeneration(store, pos[0], exe, generation)
+		var code int
+		if command == "__paste" {
+			code = paddock.RunPasteAgent(store, pos[0], generation, o["resume-notice"])
+		} else {
+			code = paddock.RunAgentGeneration(store, pos[0], exe, generation)
+		}
 		store.Close()
 		os.Exit(code)
 	}
