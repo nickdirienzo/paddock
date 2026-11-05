@@ -22,6 +22,12 @@ tasks can discover an unambiguous native identity during explicit resume.
 Missing/ambiguous native history fails visibly; retain the native agent home along
 with Paddock's registry. Paddock does not delete or relocate native history.
 
+If an initial OpenShell launch failed with `trusted MCP bridge requires host
+Codex` before the agent started, fix the host executable path and run
+`paddock resume TASK_ID` to finish starting that same task. This specific recorded
+startup failure permits the initial assignment to run in the existing workspace.
+It does not permit replaying a task with a saved conversation or a previous resume.
+
 The existing GitHub poller wakes `resumable` Codex tasks only for authorized incoming
 work. The same task/operation lock serializes resume, message delivery, and GC; a
 supervisor holds a process lease until exit. Launch generations reject stale

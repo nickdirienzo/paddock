@@ -51,6 +51,62 @@ paddock run "Implement feature X" --repo ~/code/example/project.git
 
 A plain directory named `project` next to `project.git` is not automatically a checkout. Paddock follows Git's repository discovery and does not guess sibling repository names. An existing linked worktree is also a valid starting directory.
 
+### Interactive task launcher
+
+`paddock new` opens a terminal form with a repository picker, agent and runtime selectors,
+multiline prompt, and Start task button. Registered repositories are listed by
+name; the current project is preselected when available. **Other repository…**
+accepts a registered name or a path, including `~/` and bare repositories.
+
+```sh
+paddock new
+paddock new --repo project --agent claude
+paddock rex setup
+rex config reload
+```
+
+In Rex, press **Option-Command-N** or choose **New Paddock Task** from the command
+palette. The launcher opens as a floating pane over the active tab, using the
+focused terminal's working directory when Rex can report it. It passes the
+invoking Rex client's ID so the task opens in the same app. Enable Rex's Remote
+Control setting to allow session selection.
+
+Use arrows to choose a repository or agent, Tab / Shift-Tab to move between
+fields, Enter for a newline in the prompt, and Escape or Ctrl-C to cancel. Both
+Codex and Claude Code are shown in the agent list; the runtime list shows
+OpenShell (sandbox) and Host (local machine). Selecting **Cancel** or pressing
+Escape or Ctrl-C creates no task. Launch errors remain visible until
+dismissed. If session selection fails after creation, the launcher shows the
+existing task's attach command; it does not launch again.
+
+`new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
+`--client`. The runtime selector starts at the configured default, or at
+`--runtime` when supplied. Changing it applies only to the new task and leaves
+the saved default unchanged. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
+terminal selection as `run`. Use `run` for scripts and pipelines.
+
+Setup records the executable's absolute path. Install Paddock at its stable
+location before running setup, and rerun setup if that location changes. It
+also records the setup shell's PATH and explicit Paddock tool overrides so
+mise-managed agents and the host MCP bridge work when Rex starts from the GUI.
+Run setup from a shell where your agents are available, and rerun it after
+changing their installation paths. Other shell environment variables and
+credentials are not copied into the launcher configuration. Setup updates only
+a marked section of Rex's `init.lua`, preserving surrounding user
+configuration and file permissions. It refuses malformed markers and symlinked
+configuration files.
+
+```sh
+paddock rex setup --key 'ctrl+alt+n'
+paddock rex remove
+rex config reload
+```
+
+The default shortcut is `alt+cmd+n`; choose an unused shortcut with `--key` if
+needed. Setup and removal accept `--config path`; otherwise they honor
+`REX_CONFIG`, then `$XDG_CONFIG_HOME/rex/init.lua`, then `~/.config/rex/init.lua`.
+Reload Rex using the same configuration after making a change.
+
 ### Agent discovery across repositories
 
 Run `paddock skill setup` once per user on each machine. It installs a small discoverable
@@ -171,6 +227,8 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 
 | Command | Behavior |
 | --- | --- |
+| `paddock new` | Open an interactive task form and display the created Rex session. |
+| `paddock rex setup\|remove` | Install or remove the floating task launcher and shortcut in Rex's configuration. |
 | `paddock run <prompt\|->` | Persist a task, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
 | `paddock show <id>` | Show the prompt, parent, children, repository, base commit, branch, worktree, terminal, and exit status. |

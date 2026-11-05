@@ -10,6 +10,36 @@ import (
 	"time"
 )
 
+func TestOnlyConfirmedInitialMCPFailureCanReplayAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*Task)
+		want   bool
+	}{
+		{"host Codex missing before first agent start", func(*Task) {}, true},
+		{"saved conversation must resume", func(t *Task) { t.Session.ConversationID = "saved-conversation" }, false},
+		{"previous resume must not replay", func(t *Task) { t.Session.Resume = true }, false},
+		{"missing history alone is insufficient", func(t *Task) { t.Error = "exit status 1" }, false},
+		{"unrelated MCP failure", func(t *Task) { t.Error = "host MCP connection closed" }, false},
+		{"host task", func(t *Task) { t.Runtime = "host" }, false},
+		{"still starting", func(t *Task) { t.Status = "starting" }, false},
+		{"running", func(t *Task) { t.Status = "running" }, false},
+		{"legacy generation", func(t *Task) { t.Session.Generation = 0 }, false},
+		{"no recorded exit", func(t *Task) { t.Session.ExitCode = nil }, false},
+		{"different exit", func(t *Task) { code := 2; t.Session.ExitCode = &code }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := 1
+			task := Task{Runtime: "openshell", Status: "failed", Error: "trusted MCP bridge requires host Codex: exec: codex: executable file not found in $PATH",
+				Session: Session{Generation: 1, ExitCode: &code}}
+			tc.change(&task)
+			if got := canRetryInitialMCPStartup(task); got != tc.want {
+				t.Fatalf("retry initial assignment = %t; want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNativeResumeArgumentsAndHome(t *testing.T) {
 	for _, agent := range []string{"codex", "claude"} {
 		t.Run(agent, func(t *testing.T) {
