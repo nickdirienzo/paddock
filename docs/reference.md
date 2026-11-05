@@ -185,8 +185,11 @@ Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `
 
 Use native subagents for bounded independent reviews and checks when available.
 Paddock delegation is for work that needs a durable task, a separate worktree/branch,
-or a reconnectable terminal session. Each child creates a separate Rex session or
-Screen terminal. Independent context alone does not require that lifecycle.
+or a reconnectable terminal. Rex children open as background tabs in their parent's
+session, including nested children, so the family shares one sidebar section.
+If no family session remains, Paddock creates a new section. Resuming a task reuses
+the family section when available. Screen children use separate sessions.
+Independent context alone does not require that lifecycle.
 
 ```sh
 # From your own shell:
@@ -216,6 +219,7 @@ The adapter uses commands verified against the installed Rex CLI and live local 
 
 - `rex whoami --json` discovers the endpoint; Paddock requires a local Unix socket and persists that endpoint.
 - `rex new <name> -c <worktree> --shell=none --json -- <command>` creates the terminal.
+- `rex window new -s <parent-session> <name> --focus=false ...` opens a delegated task's tab.
 - `rex ls --json`, `rex session inspect`, and `rex block call ... process` inspect it.
 - `rex -C <client> actions --json` verifies support before `do session.select` reconnects the app.
 
@@ -314,7 +318,7 @@ A task moves through `preparing → starting → running → stopped/failed`. `s
 
 The terminal runs `paddock __run <id>`, an internal supervisor that launches the agent with inherited terminal I/O and records its exit. Closing the original `paddock run` process does not stop it. Ordinary agent approval, authentication, and sandbox settings are preserved; Paddock does not bypass them.
 
-`tasks` and `show` reconcile terminal observations. A confirmed missing/exited terminal without a recorded agent exit becomes `interrupted`. An unreachable server is reported as `unknown` and does not erase the last known process status. Terminal metadata is stored before returning from launch; if a Rex launch reply is lost, the deterministic session name allows later recovery. A timed-out launch is never blindly retried.
+`tasks` and `show` reconcile terminal observations. A confirmed missing/exited terminal without a recorded agent exit becomes `interrupted`. An unreachable server is reported as `unknown` and does not erase the last known process status. Terminal metadata is stored before returning from launch; if a Rex launch reply is lost, the deterministic session or tab name allows later recovery. A timed-out launch is never blindly retried.
 
 Git and a terminal server cannot participate in a filesystem transaction. Failed launches retain their task record, error, branch, and any created worktree. If the launching CLI dies during preparation, the record can remain `preparing`; inspect the worktree and terminal before starting a replacement task. Use `paddock resume TASK` to resume an existing native conversation. Uncertain launches are not automatically retried.
 

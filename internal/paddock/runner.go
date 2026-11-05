@@ -25,6 +25,9 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	if t.RuntimeName() == "openshell" {
 		prompt = t.Prompt + "\n\nPaddock task " + t.ID + ". This agent runs inside OpenShell. Work in " + t.Worktree + ". Use ordinary git and gh; GitHub requests authenticate as " + t.OpenShell.Identity.Login + " and are restricted to " + t.OpenShell.Repository + ". Keep work on branch " + t.Branch + ". Prefer native subagents for short reviews. The host owns lifecycle and PR watches; do not create nested Paddock tasks or try to access host credentials."
 	}
+	if t.Session.Backend == "rex" && t.ParentID != "" {
+		prompt += " This task shares its Rex session with its task family. Name only this task's tab; preserve the shared session label."
+	}
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
 	args := []string{}
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {

@@ -118,3 +118,39 @@ func TestMergeLabelMissingSessionAndFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMergedPRLabelsOnlyOwnedTabInSharedSection(t *testing.T) {
+	for _, tc := range []struct {
+		name, windows string
+		rename        bool
+	}{
+		{"child", `[{"window_id":"window:parent","label":"Parent"},{"window_id":"window:child","label":"Worker fix"}]`, true},
+		{"already marked", `[{"window_id":"window:child","label":"Worker fix ✓ merged"}]`, false},
+		{"closed child", `[{"window_id":"window:parent","label":"Parent"}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "calls")
+			path := script(t, `printf '%s\n' "$*" >> `+quote(log)+`
+case "$*" in
+ *'ls --json') printf '%s' '{"sessions":[{"session_id":"session:family","label":"Investigation"}]}' ;;
+ *'session inspect '*) printf '%s' `+quote(`{"windows":`+tc.windows+`}`)+` ;;
+ *'window rename '*) exit 0 ;;
+ *) exit 1 ;;
+esac`)
+			err := markRexSessionMerged(context.Background(), Session{Backend: "rex", ID: "session:family", WindowID: "window:child", TerminalPath: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(calls), "session.set_label") || strings.Contains(string(calls), "window rename -s session:family window:parent") {
+				t.Fatal(string(calls))
+			}
+			if got := strings.Contains(string(calls), "window rename -s session:family window:child Worker fix ✓ merged"); got != tc.rename {
+				t.Fatalf("rename=%v calls=%s", got, calls)
+			}
+		})
+	}
+}

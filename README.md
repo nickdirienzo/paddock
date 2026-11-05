@@ -12,7 +12,8 @@ paddock tasks
 paddock attach TASK_ID
 ```
 
-Each task gets its own branch, Git worktree, and terminal session. You can
+Each task gets its own branch, Git worktree, and terminal. Delegated tasks open
+as tabs under their parent's Rex section. You can
 reconnect from another device through [Rex](https://www.superlogical.com/rex),
 or resume the same agent conversation later.
 

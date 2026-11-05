@@ -181,7 +181,7 @@ paddock github status --json
 paddock github stop                 # all registrations remain saved
 ```
 
-For watched PRs, the poller appends ` ✓ merged` to an existing Rex session label
+For watched PRs, the poller appends ` ✓ merged` to the task’s existing Rex tab label (or session label for legacy records without a tab ID)
 after GitHub confirms a merge, including when the agent is offline. It preserves
 the current label and does not add the suffix twice. Closing a PR without merging
 does not add it. Closed Rex sessions are not recreated; agents, native conversations,

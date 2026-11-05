@@ -183,6 +183,9 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		v.Session.Generation++
 		v.Session.Resume = true
 		v.Session.ResumeNotice = t.Session.ResumeNotice
+		if v.Session.Backend == "rex" && v.Session.ID != "" {
+			v.Session.GroupID = v.Session.ID
+		}
 		v.Session.ID, v.Session.BlockID, v.Session.WindowID = "", "", ""
 		v.Session.Name = fmt.Sprintf("paddock-%s-%d", id, v.Session.Generation)
 		v.Session.ExitCode = nil

@@ -178,6 +178,17 @@ exit 0
 		t.Fatalf("incorrect repository trust for parent/child: %+v / %+v", parent.Session, child.Session)
 	}
 	if backend == "rex" {
+		if parent.Session.ID != child.Session.ID || parent.Session.WindowID == child.Session.WindowID || parent.Session.BlockID == child.Session.BlockID {
+			t.Fatalf("child should have its own tab in the parent section: %+v / %+v", parent.Session, child.Session)
+		}
+		term := terminal{path: parent.Session.TerminalPath, endpoint: parent.Session.Endpoint}
+		state, err := term.rex(context.Background(), "session", "inspect", parent.Session.ID, "--json")
+		var focused struct {
+			Window string `json:"active_window_id"`
+		}
+		if err != nil || json.Unmarshal(state, &focused) != nil || focused.Window != parent.Session.WindowID {
+			t.Fatalf("delegation changed the active parent tab: %s / %v", state, err)
+		}
 		for _, task := range []Task{parent, child} {
 			term := terminal{path: task.Session.TerminalPath, endpoint: task.Session.Endpoint}
 			b, err := term.rex(context.Background(), "block", "call", "-s", task.Session.ID, "-b", task.Session.BlockID, "process")

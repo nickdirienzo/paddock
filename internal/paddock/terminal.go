@@ -144,12 +144,17 @@ func (t terminal) Launch(ctx context.Context, task Task, exe, home string) (Sess
 			dir = home
 		}
 		args := []string{"new", s.Name, "-c", dir, "--shell=none", "--json", "--"}
+		if s.GroupID != "" {
+			args = []string{"window", "new", "-s", s.GroupID, s.Name, "--focus=false", "-c", dir, "--shell=none", "--json", "--"}
+		}
 		b, err := t.rex(ctx, append(args, command...)...)
 		if err != nil {
 			return s, err
 		}
 		var v struct {
-			ID      string `json:"session_id"`
+			ID      string   `json:"session_id"`
+			Window  string   `json:"window_id"`
+			Blocks  []string `json:"block_ids"`
 			Windows []struct {
 				ID     string   `json:"window_id"`
 				Blocks []string `json:"block_ids"`
@@ -157,6 +162,13 @@ func (t terminal) Launch(ctx context.Context, task Task, exe, home string) (Sess
 		}
 		if err = json.Unmarshal(b, &v); err != nil {
 			return s, err
+		}
+		if s.GroupID != "" {
+			if v.Window == "" || len(v.Blocks) == 0 || v.Blocks[0] == "" {
+				return s, fmt.Errorf("Rex returned incomplete window metadata")
+			}
+			s.ID, s.WindowID, s.BlockID = s.GroupID, v.Window, v.Blocks[0]
+			return s, nil
 		}
 		if v.ID == "" || len(v.Windows) == 0 || len(v.Windows[0].Blocks) == 0 {
 			return s, fmt.Errorf("Rex returned incomplete session metadata")
@@ -180,6 +192,9 @@ var screenLine = regexp.MustCompile(`(?m)^\s*([0-9]+)\.([^\s]+)\s+.*\((Detached|
 func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation) {
 	s := task.Session
 	unknown := func(err error) (Session, Observation) { return s, Observation{State: "unknown", Error: err.Error()} }
+	if t.backend == "rex" && s.ID == "" && s.GroupID != "" {
+		s.ID = s.GroupID
+	}
 	if t.backend == "screen" {
 		b, err := output(ctx, t.path, "-ls")
 		// Screen versions disagree on exit codes, including 1 for a valid list.
@@ -233,6 +248,7 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 		var v struct {
 			Windows []struct {
 				ID    string `json:"window_id"`
+				Label string `json:"label"`
 				Block string `json:"focused_block_id"`
 			} `json:"windows"`
 		}
@@ -242,8 +258,19 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 		if len(v.Windows) == 0 {
 			return s, Observation{State: "missing"}
 		}
-		s.WindowID = v.Windows[0].ID
-		s.BlockID = v.Windows[0].Block
+		matched := false
+		for _, window := range v.Windows {
+			if (s.WindowID != "" && window.ID == s.WindowID) ||
+				(s.WindowID == "" && s.GroupID != "" && window.Label == s.Name) ||
+				(s.WindowID == "" && s.GroupID == "" && window.ID == v.Windows[0].ID) {
+				s.WindowID, s.BlockID = window.ID, window.Block
+				matched = true
+				break
+			}
+		}
+		if !matched || s.BlockID == "" {
+			return s, Observation{State: "missing"}
+		}
 	}
 	b, err = t.rex(ctx, "block", "call", "-s", s.ID, "-b", s.BlockID, "process")
 	if err != nil {
@@ -264,6 +291,25 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 			}
 			if missing {
 				if len(blocks.Blocks) != 0 {
+					if s.WindowID != "" {
+						state, stateErr := t.rex(ctx, "session", "inspect", s.ID, "--json")
+						var windows struct {
+							Windows []struct {
+								ID string `json:"window_id"`
+							} `json:"windows"`
+						}
+						if stateErr == nil && json.Unmarshal(state, &windows) == nil && windows.Windows != nil {
+							present := false
+							for _, window := range windows.Windows {
+								if window.ID == "" || window.ID == s.WindowID {
+									present = true
+								}
+							}
+							if !present {
+								return s, Observation{State: "missing"}
+							}
+						}
+					}
 					return unknown(fmt.Errorf("tracked Rex pane is missing but other panes remain; inspect and reconnect the existing agent before resuming"))
 				}
 				return s, Observation{State: "missing"}
