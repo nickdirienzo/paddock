@@ -47,6 +47,7 @@ type Session struct {
 	Endpoint       string `json:"endpoint,omitempty"`
 	Name           string `json:"name"`
 	ID             string `json:"id,omitempty"`
+	GroupID        string `json:"group_id,omitempty"` // Rex session selected before creating a task tab
 	BlockID        string `json:"block_id,omitempty"`
 	WindowID       string `json:"window_id,omitempty"`
 	ExitCode       *int   `json:"exit_code,omitempty"`

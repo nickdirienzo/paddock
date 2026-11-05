@@ -159,6 +159,9 @@ func (s Service) launchTask(ctx context.Context, t Task) (Task, error) {
 		current, _ := s.Store.Get(t.ID)
 		return current, fmt.Errorf("task %s: %w", t.ID, cause)
 	}
+	if err = s.prepareRexGroup(ctx, &t); err != nil {
+		return fail(err)
+	}
 	launched, launchErr := term.Launch(ctx, t, s.Executable, s.Store.Home)
 	if launchErr != nil {
 		// A timed-out launch may have succeeded. Inspect the deterministic name;

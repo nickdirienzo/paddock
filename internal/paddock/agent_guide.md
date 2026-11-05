@@ -47,7 +47,11 @@ a Paddock task, another worktree, or a visible Rex session.
 
 Use `paddock delegate` when the work needs a durable task identity, an independent
 worktree/branch, or a persistent session the user can reconnect to, or when the user
-explicitly requests it. Each delegated task creates a separate terminal session.
+explicitly requests it. Each delegated task has its own terminal. Rex children open
+as background tabs in their parent's session, keeping the task family in one sidebar
+section. Nested children share that section too. If the family has no remaining Rex
+session, a new section is created. Screen children have separate Screen sessions.
+Name a child task's Rex tab rather than renaming the shared session.
 If native subagents are unavailable, use a bounded fresh-context invocation when
 supported for a short independent review; do not automatically escalate every review
 into a persistent Paddock task. Preserve repository requirements for independent review.
