@@ -122,7 +122,7 @@ func liveTerminalLifecycle(t *testing.T, backend string, bareAlias bool) {
 		}
 		childAgent = "codex"
 	}
-	agent := script(t, `if [ "${1:-}" = "--version" ]; then exit 1; fi
+	agent := script(t, `if [ "${1:-}" = "--version" ]; then echo '2.1.286 (Claude Code)'; exit 0; fi
 printf '%s' "$PADDOCK_TASK_ID" > identity
 printf '%s' "$$" > agent-pid
 for argument; do prompt=$argument; done

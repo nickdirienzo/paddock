@@ -1,5 +1,30 @@
 # GitHub coordination acceptance evidence
 
+## Claude delivery — 2026-11-09
+
+Native message routing now supports Claude in host and OpenShell tasks. Host
+qualification used the installed Claude Code 2.1.286 in an already trusted
+directory, with its existing login, workspace trust and tool permissions. A
+disposable interactive session admitted the message through its Unix inbox,
+persisted the exact enqueue record and replied `PADDOCK_HOST_INBOX_OK` in the same
+conversation. No GitHub writes or source edits were made by the probe. A first
+probe in an untrusted checkout stopped at the native trust dialog; trust was not
+changed to make the test pass.
+
+Automated coverage exercises macOS and Linux peer identity, stale/missing inboxes,
+held/refused or mismatched enqueue evidence, host supervisor launch/resume cleanup,
+whole-review delivery and deduplication in both runtimes, and routing validation
+for both agents. The Linux OpenShell Python inbox tests also pass. Full Go race
+tests, vet, and Linux/Windows builds pass. Windows compilation does not qualify
+host Claude delivery; host peer verification supports macOS and Linux.
+
+Host sessions launched before this change need a normal exit and resume. Their
+comments remain pending until the inbox exists. Native host resume identity and
+supervisor behavior have deterministic coverage; the live probe qualified initial
+launch and message admission/reply, not a full GitHub round trip or native cold resume.
+
+## Historical Codex checkpoint
+
 This is the historical PR #1 checkpoint. See [App acceptance](github-app-acceptance.md)
 for the subsequent native authentication and routing checks.
 

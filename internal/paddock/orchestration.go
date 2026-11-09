@@ -406,8 +406,8 @@ func (o Orchestrator) validateActions(ctx context.Context, signal Signal, p Orch
 				return fmt.Errorf("task actions derive repository from their target")
 			}
 			if a.Kind == "message" {
-				if task.Session.Agent != "codex" || a.Base != "" || a.Agent != "" {
-					return fmt.Errorf("message requires a Codex task and no launch options")
+				if !nativeMessageSupported(task) || a.Base != "" || a.Agent != "" {
+					return fmt.Errorf("message requires a task with native delivery support and no launch options")
 				}
 			} else {
 				if !slices.Contains(p.Repos, task.Repo) {

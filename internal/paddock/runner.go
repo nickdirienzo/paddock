@@ -140,6 +140,18 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		defer stopMCP()
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
+	var inbox claudeInbox
+	if t.RuntimeName() == "host" && t.Session.Agent == "claude" && nativeMessageSupported(t) {
+		var cleanup func()
+		inbox, cleanup, err = prepareHostClaudeInbox(t, c)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not prepare Claude inbox:", err)
+			_ = store.Finish(t.ID, 1, err.Error())
+			return 1
+		}
+		defer cleanup()
+		defer os.Remove(store.claudeInboxFile(t.ID))
+	}
 	if err = wrapClipboardCommand(t, store.Home, exe, c); err != nil {
 		fmt.Fprintln(os.Stderr, "Could not prepare image paste:", err)
 		_ = store.Finish(t.ID, 1, err.Error())
@@ -157,6 +169,12 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	if err != nil {
 		message = err.Error()
 	} else {
+		if inbox.Socket != "" {
+			inbox.PID = c.Process.Pid
+			if inboxErr := writeJSONAtomic(store.claudeInboxFile(t.ID), inbox); inboxErr != nil {
+				fmt.Fprintln(os.Stderr, "Could not publish Claude inbox; messages remain pending:", inboxErr)
+			}
+		}
 		bindingCtx, bindingCancel := context.WithCancel(context.Background())
 		bindingDone := make(chan struct{})
 		go func() { defer close(bindingDone); captureConversation(bindingCtx, store, t) }()

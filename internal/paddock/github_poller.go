@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 5 // v5 handles sandbox requests for host shell tabs.
+const githubPollerVersion = 6 // v6 adds native inbox delivery for host Claude tasks.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -321,6 +321,11 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 		return "unknown"
 	}
 	if task.Status == "running" && observation.State == "running" {
+		if task.Session.Agent == "claude" && task.RuntimeName() == "host" {
+			if _, err := s.Store.hostClaudeInbox(task); err != nil {
+				return "offline"
+			}
+		}
 		return "online"
 	}
 	return "offline"

@@ -28,6 +28,31 @@ func orchestrationFixture(t *testing.T) (Orchestrator, *testPlanner, Signal, Orc
 	opts := OrchestrationOptions{Policy: OrchestrationPolicy{Tasks: []string{w.TaskID}}}
 	return o, p, sig, opts, log
 }
+
+func TestOrchestrationMessageSupportsBothAgentsAndRuntimes(t *testing.T) {
+	for _, agent := range []string{"codex", "claude", "unknown"} {
+		for _, runtime := range []string{"host", "openshell"} {
+			t.Run(agent+"/"+runtime, func(t *testing.T) {
+				store := openTestStore(t, t.TempDir())
+				task := taskFixture()
+				task.Runtime, task.Session.Agent = runtime, agent
+				if err := store.Insert(task); err != nil {
+					t.Fatal(err)
+				}
+				action := Action{Kind: "message", TaskID: task.ID, Text: "fix the review", Reason: "existing owner"}
+				o := Orchestrator{Service: Service{Store: store}}
+				err := o.validateActions(context.Background(), Signal{}, OrchestrationPolicy{Tasks: []string{task.ID}}, []Action{action})
+				if (err == nil) != nativeMessageSupported(task) {
+					t.Fatal("routing gate disagrees with delivery adapter", err)
+				}
+				action.Agent = "codex"
+				if err := o.validateActions(context.Background(), Signal{}, OrchestrationPolicy{Tasks: []string{task.ID}}, []Action{action}); err == nil {
+					t.Fatal("message allowed launch options")
+				}
+			})
+		}
+	}
+}
 func TestOrchestrationContextDryRunAndReplay(t *testing.T) {
 	o, p, sig, opts, log := orchestrationFixture(t)
 	p.decide = func(in PlanningInput) (Decision, error) {

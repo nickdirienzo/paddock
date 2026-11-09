@@ -138,7 +138,7 @@ paddock github stop                 # stop service; retain all watches
 ```
 
 Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
-comments for resumable Codex and OpenShell Claude tasks wake the same saved conversation and worktree.
+comments for resumable Codex and Claude tasks in either runtime wake the same saved conversation and worktree.
 Tasks without a saved conversation ID remain offline, with comments pending and no
 eyes reaction; use `paddock resume TASK_ID` to recover the identity when possible. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
 or register a watch again; there is no automatic login service yet.
@@ -171,7 +171,10 @@ its own reply command and eyes receipt. Later thread replies and standalone comm
 arrive individually. GitHub does not support eyes reactions on review summaries.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
 and authorized authors trigger delivery. Incoming PR message delivery supports
-Codex and OpenShell Claude tasks. Host Claude tasks have no native delivery adapter.
+Codex and Claude tasks in both runtimes (host Claude requires macOS or Linux).
+Claude inbox delivery is qualified for Claude Code 2.1.286. Host sessions launched
+before inbox support must exit and be resumed with the updated CLI; do not kill or
+restart a live session merely to enable delivery. Its unconsumed comments stay pending.
 Claude applies its own peer-message admission and tool approvals; held or uncertain
 deliveries require inspection, never terminal typing or blind retries.
 

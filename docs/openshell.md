@@ -192,7 +192,7 @@ Without this option, register a watch explicitly
 from the host. Sandboxed agents use ordinary `gh` for PRs/replies; the host owns task
 coordination. `paddock message TASK 'instructions'` uses the agent's native inbox inside
 the sandbox, resuming the saved conversation when needed. Claude support is pinned
-to 2.1.286 and currently limited to OpenShell tasks. Paddock verifies the inbox's
+to 2.1.286 and also works on macOS and Linux host tasks. Paddock verifies the inbox's
 process, conversation, and launch generation, then requires an exact persisted
 `queue-operation: enqueue` record before acknowledging delivery. A socket write
 alone is insufficient. Claude treats these as peer messages: its hold/refuse rules
