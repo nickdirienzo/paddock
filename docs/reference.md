@@ -141,7 +141,7 @@ the approved author list, and asks agents to report watch and poller readiness w
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions, resumes stopped Codex and OpenShell Claude conversations when their
+routes comments to online sessions, resumes stopped Codex and Claude conversations in either runtime when their
 identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 

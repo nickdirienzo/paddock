@@ -1,10 +1,12 @@
 # GitHub coordination
 
 Paddock can poll explicitly watched pull requests and route comments to their owning
-local tasks. The initial native message adapter uses Codex's session queue. Claude
-can still own ordinary Paddock tasks, but cannot receive GitHub messages through this
-adapter; delivery is recorded as uncertain with an explicit error rather than typed
-into its terminal. Delegation uses the existing task/worktree launcher.
+local tasks. Codex uses its native session queue and Claude uses its native inbox,
+in both host and OpenShell runtimes. Host Claude supports macOS and Linux and, like
+the OpenShell image, requires qualified Claude Code 2.1.286. Claude's peer-message
+admission and tool approvals remain in force. Delivery requires a persisted native
+enqueue record; uncertain deliveries are held for inspection. Delegation uses the
+existing task/worktree launcher.
 
 ## Configure a GitHub App
 
@@ -195,14 +197,18 @@ report API errors; those are retried and don't terminate the service. To change 
 interval or load an upgraded binary, stop and start it. Logs live in
 `$PADDOCK_HOME/github-poller.log` (mode 0600).
 
-Stopped Codex tasks with a saved conversation ID are reported as `resumable`. A new
+Stopped Codex and Claude tasks with a saved conversation ID are reported as `resumable`. A new
 authorized comment wakes the same task and conversation before native queue delivery.
 If the worktree was collected, it is reconstructed from Git with an explicit recovery
 notice. Missing history, uncertain launches, or unavailable terminals keep comments pending.
 Tasks without a saved identity remain offline until explicitly resumed; no replacement
 conversation is created. An exited agent's already queued replies
 and delivery receipts can still be published. Native message routing currently supports
-Codex; other agents are reported as unsupported.
+Codex and Claude in both runtimes. After upgrading the CLI, restart the shared
+poller with `paddock github stop` followed by `paddock github start`. Host Claude
+sessions launched before inbox support must exit normally and be reopened with
+`paddock resume TASK_ID` to enable the inbox. Paddock leaves their comments pending
+until then; it never restarts a running agent or types into its terminal.
 
 `paddock github poll` processes once. `paddock github poll --interval 30s` runs in the
 foreground and takes the same singleton lease; it refuses to start if a poller is

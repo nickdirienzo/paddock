@@ -210,7 +210,8 @@ func TestResumeSerializesAndKeepsWarmState(t *testing.T) {
 	active := filepath.Join(t.TempDir(), "active")
 	finish := filepath.Join(t.TempDir(), "finish")
 	// A real supervisor/process with fixture native CLI and terminal adapters.
-	agent := script(t, `printf '%s\n' "$@" > `+quote(log)+`
+	agent := script(t, `if [ "$1" = --version ]; then echo '2.1.286 (Claude Code)'; exit 0; fi
+printf '%s\n' "$@" > `+quote(log)+`
 while [ ! -f `+quote(finish)+` ]; do sleep 0.05; done
 rm -f `+quote(active)+`
 `)
@@ -247,7 +248,7 @@ esac
 	}
 	waitFor(t, func() bool { _, err := os.Stat(log); return err == nil })
 	b, err := os.ReadFile(log)
-	if err != nil || string(b) != "--resume\n"+task.Session.ConversationID+"\n" {
+	if err != nil || !strings.HasPrefix(string(b), "--messaging-socket-path\n") || !strings.HasSuffix(string(b), "\n--resume\n"+task.Session.ConversationID+"\n") {
 		t.Fatalf("%q %v", b, err)
 	}
 	if b, err := os.ReadFile(filepath.Join(task.Worktree, "warm-build-state")); err != nil || string(b) != "keep" {

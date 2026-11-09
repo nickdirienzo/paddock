@@ -28,12 +28,13 @@ Codex` before the agent started, fix the host executable path and run
 startup failure permits the initial assignment to run in the existing workspace.
 It does not permit replaying a task with a saved conversation or a previous resume.
 
-The existing GitHub poller wakes `resumable` Codex tasks only for authorized incoming
+The existing GitHub poller wakes `resumable` Codex and Claude tasks for authorized incoming
 work. The same task/operation lock serializes resume, message delivery, and GC; a
 supervisor holds a process lease until exit. Launch generations reject stale
 supervisors. Existing signal IDs and delivery receipts still prevent duplicate
-delivery. Failed wake-ups before queue delivery remain pending. Claude supports
-explicit resume, but the GitHub native-message adapter still supports Codex only.
+delivery. Failed wake-ups before queue delivery remain pending. Both runtimes support
+native message delivery. Host Claude requires macOS or Linux and Claude Code 2.1.286;
+older running sessions need a normal exit and resume to enable their native inbox.
 
 ## Retention and conservative GC
 
