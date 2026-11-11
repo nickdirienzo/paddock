@@ -2,6 +2,7 @@ package paddock
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -82,6 +83,45 @@ func TestLiveNativeConversationLookup(t *testing.T) {
 	got, err := codexTaskThread(context.Background(), Task{Worktree: cwd, Session: Session{Agent: "codex", AgentPath: path, AgentHome: os.Getenv("CODEX_HOME"), ConversationID: id}})
 	if err != nil || got != id {
 		t.Fatal(got, err)
+	}
+	got, err = codexTaskThread(context.Background(), Task{Worktree: cwd, Session: Session{Agent: "codex", AgentPath: path, AgentHome: os.Getenv("CODEX_HOME")}})
+	if err != nil || got != id {
+		t.Fatal("unsaved conversation recovery:", got, err)
+	}
+}
+
+func TestCodexTaskThreadRecoversHostVscodeSession(t *testing.T) {
+	cwd := t.TempDir()
+	id := newConversationID()
+	request := filepath.Join(t.TempDir(), "thread-list-request")
+	agent := script(t, `while IFS= read -r line; do
+ case "$line" in
+  *'"id":1'*) printf '%s\n' '{"id":1,"result":{}}' ;;
+  *'"id":2'*)
+   printf '%s\n' "$line" > `+quote(request)+`
+   printf '%s\n' '{"id":2,"result":{"data":[{"id":"`+id+`","cwd":"`+cwd+`"}],"nextCursor":null}}' ;;
+ esac
+done
+`)
+	task := Task{Runtime: "host", Worktree: cwd, Session: Session{Agent: "codex", AgentPath: agent}}
+	got, err := codexTaskThread(context.Background(), task)
+	if err != nil || got != id {
+		t.Fatalf("recovered thread = %q, %v; want %q", got, err, id)
+	}
+	data, err := os.ReadFile(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var call struct {
+		Params struct {
+			SourceKinds []string `json:"sourceKinds"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(data, &call); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(call.Params.SourceKinds, []string{"cli", "appServer", "vscode"}) {
+		t.Fatalf("host source kinds = %q", call.Params.SourceKinds)
 	}
 }
 

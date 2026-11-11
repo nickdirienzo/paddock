@@ -28,6 +28,9 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	if t.Session.Backend == "rex" && t.ParentID != "" {
 		prompt += " This task shares its Rex session with its task family. Name only this task's tab; preserve the shared session label."
 	}
+	if t.Role == "tp" {
+		prompt = teamPrincipalPrompt(t, home, exe)
+	}
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
 	args := []string{}
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {
@@ -57,8 +60,12 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 			args = append(args, "--resume", t.Session.ConversationID)
 		}
 		// Never replay the original assignment on resume.
-		if t.Session.ResumeNotice != "" {
-			args = append(args, "--", t.Session.ResumeNotice)
+		notice := t.Session.ResumeNotice
+		if t.Role == "tp" {
+			notice = strings.TrimSpace(notice + "\n\n" + prompt)
+		}
+		if notice != "" {
+			args = append(args, "--", notice)
 		}
 	} else {
 		if t.Session.Agent == "claude" && t.Session.ConversationID != "" {

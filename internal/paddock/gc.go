@@ -47,6 +47,11 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 			return results, err
 		}
 		result := GCResult{TaskID: task.ID, Worktree: task.Worktree}
+		if task.Role == "tp" {
+			result.Reason = "Team Principal workspace contains durable project context"
+			results = append(results, result)
+			continue
+		}
 		func() {
 			release, err := s.Store.taskLease(task.ID, "operation")
 			if err != nil {
