@@ -181,10 +181,9 @@ func codexTaskThread(ctx context.Context, task Task) (string, error) {
 		} `json:"data"`
 		NextCursor *string `json:"nextCursor"`
 	}
-	sources := []string{"cli"}
-	if task.RuntimeName() == "openshell" {
-		sources = append(sources, "appServer", "vscode")
-	}
+	// Codex TUI sessions may be recorded as vscode even when launched by the
+	// host CLI. Keep subagent sessions excluded while finding the task thread.
+	sources := []string{"cli", "appServer", "vscode"}
 	if err = call(2, "thread/list", map[string]any{"cwd": cwd, "limit": 100, "archived": false, "sourceKinds": sources, "modelProviders": []string{}}, &response); err != nil {
 		return "", err
 	}
