@@ -1,5 +1,13 @@
 # Paddock
 
+`paddock tp` opens the registry's persistent Team Principal, a host Codex or
+Claude conversation about all agents working on Paddock tasks across projects.
+TP refreshes task/PR state through the existing commands and saves confirmed
+project decisions in its retained worktree's projects/ directory. It launches
+authorized implementation with `paddock run --repo PROJECT --json`, preserving
+the configured runtime. It does not implement work in the TP repository or start
+new work without user direction. Ordinary tasks keep their existing role.
+
 Paddock runs local coding tasks in Git worktrees and persistent terminals. Use the
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.

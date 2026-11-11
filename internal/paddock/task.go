@@ -10,6 +10,7 @@ import (
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
 type Task struct {
+	Role               string         `json:"role,omitempty"`
 	Runtime            string         `json:"runtime,omitempty"` // empty on legacy host tasks
 	OpenShell          *OpenShellTask `json:"openshell,omitempty"`
 	ID                 string         `json:"id"`
