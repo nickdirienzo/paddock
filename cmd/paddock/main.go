@@ -16,6 +16,7 @@ import (
 
 const help = `Paddock — a local control plane for coding agents
 
+  paddock tp [--agent codex|claude] [--terminal auto|rex|screen] [--json] [--detach] [--client Rex-client-id]
   paddock new [--repo name-or-path] [--agent codex|claude] [--runtime openshell|host]
   paddock rex setup|remove [--config path] [--key shortcut]
   paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
@@ -199,6 +200,9 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "tp" {
+		return runTP(args[1:], out)
+	}
 	if command == "new" {
 		return runNew(args[1:], out)
 	}

@@ -97,6 +97,21 @@ for installation details.
 
 ## Use the CLI
 
+Run `paddock tp` for a persistent Team Principal conversation about all agents
+working on Paddock tasks, across projects. Ask what happened overnight, what needs
+your attention, or have it delegate an investigation through `paddock run`.
+
+```sh
+paddock tp                 # start or return to your Team Principal
+paddock tp --agent claude  # choose Claude Code on the first launch
+```
+
+TP defaults to Codex and runs on the host with your normal agent permissions so
+it can use Paddock's coordination commands. Implementation tasks retain your
+configured runtime. Confirmed project decisions and rationale live as Markdown
+in TP's retained worktree; task and PR status come from Paddock and GitHub.
+See [Team Principal](docs/tp.md) for persistence and launch options.
+
 For an interactive task form, run `paddock new`. Choose a repository, agent, and runtime,
 write a multiline prompt, and select **Start task**. Registered repository names
 appear in the picker alongside the current project; **Other repository…** accepts

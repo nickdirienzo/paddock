@@ -13,7 +13,7 @@ type Service struct {
 	Store      *Store
 	Executable string
 }
-type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base, ID, SignalID, RelatedTaskID, Runtime string }
+type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base, ID, SignalID, RelatedTaskID, Runtime, Role string }
 
 func ValidateStateHome(home, repo string) error {
 	if rel, err := filepath.Rel(repo, home); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
@@ -33,6 +33,9 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	}
 	if o.Runtime != "host" && o.Runtime != "openshell" {
 		return empty, fmt.Errorf("unknown runtime %q (use openshell or host)", o.Runtime)
+	}
+	if o.Role != "" && (o.Role != "tp" || o.Runtime != "host") {
+		return empty, fmt.Errorf("Team Principal requires the host runtime")
 	}
 	if strings.TrimSpace(o.Prompt) == "" {
 		return empty, fmt.Errorf("a non-empty task prompt is required")
@@ -122,7 +125,10 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	session.TrustProject = trusted && o.Agent == "codex"
 	session.AgentPath = agentPath
 	session.Name = "paddock-" + id
-	t := Task{ID: id, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
+	if o.Role == "tp" {
+		session.Name = "team-principal-" + id
+	}
+	t := Task{ID: id, Role: o.Role, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
 		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
 	// Never put state or new worktrees inside the caller's checkout.
 	t.Runtime = "host"

@@ -202,6 +202,9 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		}
 		v.Session.ID, v.Session.BlockID, v.Session.WindowID = "", "", ""
 		v.Session.Name = fmt.Sprintf("paddock-%s-%d", id, v.Session.Generation)
+		if v.Role == "tp" {
+			v.Session.Name = fmt.Sprintf("team-principal-%s-%d", id, v.Session.Generation)
+		}
 		v.Session.ExitCode = nil
 		v.Session.StartedAt, v.Session.EndedAt = "", ""
 		v.Status, v.Error = "starting", ""

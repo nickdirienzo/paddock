@@ -227,6 +227,7 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 
 | Command | Behavior |
 | --- | --- |
+| `paddock tp` | Open or resume the registry's persistent Team Principal conversation; see [Team Principal](tp.md). |
 | `paddock new` | Open an interactive task form and display the created Rex session. |
 | `paddock rex setup\|remove` | Install or remove the floating task launcher and shortcut in Rex's configuration. |
 | `paddock run <prompt\|->` | Persist a task, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
