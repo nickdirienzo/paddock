@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 6 // v6 adds native inbox delivery for host Claude tasks.
+const githubPollerVersion = 7 // v7 requires OpenShell-only routing and identity-aware task state.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
