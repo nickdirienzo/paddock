@@ -70,8 +70,10 @@ paddock run --repo project --identity mozzie --profile implementation \
 ```
 
 To use an App that already exists, create the identity and run `associate` with
-its App ID, installation ID, and protected key file. Use `identity github rotate`
-with a new key; rotation requires the same App, installation, and bot actor.
+its App ID, installation ID, and protected key file. `associate` requires an
+unbacked identity; detach the old App before changing actors so its managed key
+is removed. Use `identity github rotate` with a new key when keeping the same
+App; rotation requires the same App, installation, and bot actor.
 `identity github detach` clears
 the Paddock binding; `identity disable` blocks new tasks and token renewal.
 Revoking an App key or uninstalling the App itself is an action in GitHub's App

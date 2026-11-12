@@ -228,6 +228,9 @@ func runIdentityGitHub(args []string, out io.Writer) error {
 		if command == "rotate" && identity.Mode != "app" {
 			return fmt.Errorf("identity %q has no App key to rotate", name)
 		}
+		if command == "associate" && identity.Mode != "" {
+			return fmt.Errorf("identity %q already has GitHub credentials; use rotate for the same App or detach before associating another App", name)
+		}
 		if command == "rotate" {
 			authArgs, err := rotationAuthArgs(name, identity, args[2:])
 			if err != nil {

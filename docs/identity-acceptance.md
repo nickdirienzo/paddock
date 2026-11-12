@@ -86,6 +86,13 @@ changed.
   strict metadata isolation remains open. A task-local libseccomp prototype
   could resolve the relevant metadata syscalls, but the qualified guest's
   `seccomp_load` returned `ECANCELED`; no metadata filter was deployed.
+- An isolated credential-free sandbox with `process.run_as_user: "1500"`
+  confirmed ordinary exec and gateway upload both created files as UID 1500.
+  Changing the workload UID therefore does not separate checkout ownership
+  from the investigation agent. The exact probe sandbox was deleted and
+  confirmed absent. OpenShell 0.1.6 also keeps filesystem and process policy
+  fixed after workload start, as described in its
+  [policy management guide](https://docs.nvidia.com/openshell/v0.1.6/how-it-works/policies/manage-policies).
 - A rebuilt CLI read the still-running Claude task's pinned native transcript
   inside OpenShell while its workspace trust prompt was open. `show --json`
   returned `last_turn.state: none`, without sending transcript content to the

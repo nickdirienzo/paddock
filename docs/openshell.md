@@ -112,6 +112,11 @@ Linux Landlock does not restrict metadata operations such as `chmod`; a live
 probe could change the mode of a temporary worktree file. Investigation tasks
 cannot push with their read-only GitHub token, but strict worktree metadata
 immutability still needs a separate ownership or staging design.
+OpenShell 0.1.6 accepts live network-policy changes, but its filesystem and
+process policy is fixed when the workload starts. A credential-free probe with
+`process.run_as_user: "1500"` showed that both ordinary exec and the gateway
+uploader used UID 1500, so selecting another workload UID does not give the
+checkout a separate owner. The probe sandbox was deleted.
 
 ## Pasted images
 

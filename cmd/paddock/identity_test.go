@@ -60,6 +60,39 @@ func TestRotatePreservesGitHubPrincipal(t *testing.T) {
 	}
 }
 
+func TestAssociateRequiresUnbackedIdentity(t *testing.T) {
+	t.Setenv("PADDOCK_HOME", t.TempDir())
+	home, err := paddock.StateHome()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := paddock.OpenStore(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller, err := paddock.LocalCaller()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateIdentity("mozzie", caller, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateGitHub(func(v *paddock.GitHubState) error {
+		identity := v.Identities["mozzie"]
+		identity.Mode = "app"
+		identity.Login = "mozziebot[bot]"
+		identity.App = &paddock.GitHubAppConfig{AppID: 12, InstallationID: 34}
+		v.Identities["mozzie"] = identity
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	if err := runIdentityGitHub([]string{"associate", "mozzie"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "already has GitHub credentials") {
+		t.Fatalf("associate replaced an existing App: %v", err)
+	}
+}
+
 func TestGitHubCLIHidesAndProtectsOtherOwners(t *testing.T) {
 	t.Setenv("PADDOCK_HOME", t.TempDir())
 	home, err := paddock.StateHome()
