@@ -146,12 +146,22 @@ esac`)
 		t.Fatal(err)
 	}
 	t.Setenv("PADDOCK_SCREEN_BIN", script(t, `echo 'Screen version fixture'`))
+	// Investigation needs a locally pinned image before it can create the
+	// sandbox. Keep that failure deterministic in this command-routing test.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 9\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	repo := repoFixture(t) // intentionally has no GitHub origin
 	for _, profile := range []string{"investigation", "implementation"} {
 		t.Run(profile, func(t *testing.T) {
 			task, err := (Service{Store: store}).Run(context.Background(), RunOptions{Repo: repo, Identity: "local", Profile: profile, Agent: "codex", Backend: "screen", Prompt: "inspect locally"})
 			if err == nil || task.ID == "" || task.OpenShell == nil {
 				t.Fatal("local task was rejected before sandbox preparation", task, err)
+			}
+			if profile == "investigation" && !strings.Contains(err.Error(), "pin the configured runtime image locally") {
+				t.Fatalf("investigation did not fail closed on image preparation: %v", err)
 			}
 			if task.Provenance.Identity != "local" || task.Provenance.GitHubActor != "" || task.OpenShell.Provider != "" || task.OpenShell.Repository != "" || task.OpenShell.GitAuthorName != "local" || task.OpenShell.GitAuthorEmail != "local@paddock.invalid" {
 				t.Fatalf("incorrect local identity: %+v", task)
@@ -164,7 +174,7 @@ esac`)
 		})
 	}
 	calls, err := os.ReadFile(log)
-	if err != nil || !strings.Contains(string(calls), "sandbox create") || strings.Contains(string(calls), "profile import") || strings.Contains(string(calls), "paddock-") || strings.Count(string(calls), "--provider") != 2 {
+	if err != nil || strings.Count(string(calls), "sandbox create") != 1 || strings.Contains(string(calls), "profile import") || strings.Contains(string(calls), "paddock-") || strings.Count(string(calls), "--provider") != 1 {
 		t.Fatalf("unexpected OpenShell calls: %s %v", calls, err)
 	}
 }
@@ -254,6 +264,24 @@ func TestSandboxGCRequiresStoppedCompute(t *testing.T) {
 	results, e := (Service{Store: s}).GC(context.Background(), true)
 	if e != nil || len(results) != 1 || results[0].Removed || results[0].Eligible || !strings.Contains(results[0].Reason, "confirmed stopped") {
 		t.Fatalf("unsafe sandbox collection: %+v %v", results, e)
+	}
+}
+
+func TestSandboxGCRetainsRootOwnedInvestigationImage(t *testing.T) {
+	s := openTestStore(t, t.TempDir())
+	task := taskFixture()
+	task.Runtime = "openshell"
+	task.Worktree = "/sandbox/worktree"
+	task.Status = "stopped"
+	task.Provenance.Profile = "investigation"
+	task.LastActivityAt = time.Now().Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano)
+	task.OpenShell = &OpenShellTask{Name: "pd-fixture", Ready: true, ReadOnlyGuard: true, ReadOnlyGuardVersion: investigationGuardVersion}
+	if err := s.Insert(task); err != nil {
+		t.Fatal(err)
+	}
+	results, err := (Service{Store: s}).GC(context.Background(), true)
+	if err != nil || len(results) != 1 || results[0].Eligible || results[0].Removed || !strings.Contains(results[0].Reason, "retained in its task image") {
+		t.Fatalf("immutable checkout was collected separately: %+v %v", results, err)
 	}
 }
 

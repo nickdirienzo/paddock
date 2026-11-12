@@ -28,7 +28,7 @@ func TestLegacyInvestigationGuardCannotResumeOrReceiveMessages(t *testing.T) {
 	}
 	defer store.Close()
 	task := Task{ID: newID(), Runtime: "openshell", Status: "stopped", Provenance: TaskProvenance{Profile: "investigation"},
-		Session: Session{Agent: "codex", ConversationID: newConversationID()}, OpenShell: &OpenShellTask{Name: "pd-legacy", Ready: true, ReadOnlyGuard: true, ReadOnlyGuardVersion: 2}}
+		Session: Session{Agent: "codex", ConversationID: newConversationID()}, OpenShell: &OpenShellTask{Name: "pd-legacy", Ready: true, ReadOnlyGuard: true, ReadOnlyGuardVersion: 3}}
 	if err := store.Insert(task); err != nil {
 		t.Fatal(err)
 	}

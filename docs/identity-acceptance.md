@@ -112,8 +112,8 @@ changed.
   completed turns.
 - A further guarded probe showed that `chmod` on a temporary worktree file
   still succeeds. Landlock enforces the tested file-content write denial but
-  does not make worktree metadata immutable. The temporary file was removed;
-  strict metadata isolation remains open. A task-local libseccomp prototype
+  does not make worktree metadata immutable. The temporary file was removed.
+  A task-local libseccomp prototype
   could resolve the relevant metadata syscalls, but the qualified guest's
   `seccomp_load` returned `ECANCELED`; no metadata filter was deployed.
 - An isolated credential-free sandbox with `process.run_as_user: "1500"`
@@ -131,6 +131,19 @@ changed.
   fixture also covers queued follow-ups and partial transcript appends. The
   version-3 live task confirmed this signal across both the initial turn and a
   follow-up.
+- A credential-free root-owned checkout image denied `chmod` and file creation
+  for the `sandbox` user in Docker and in the qualified OpenShell guest, while
+  home remained writable. OpenShell required the image's default working
+  directory to remain writable; the checkout itself could be root-owned.
+- Guard version 4 now builds a task-specific image from exactly the selected
+  Git commit and ancestry. App-backed Codex investigation
+  `59371608f017dd9d4df14cce` used pinned image
+  `sha256:7a115286475d45d41ca573e0f042801b555f6cc3a45295a471fdab840f0da03d`.
+  Its checkout and Git database were root-owned. The native model turn showed
+  `chmod 600 README.md` failed with `Operation not permitted`, source `touch`
+  failed with `Permission denied`, and `git status --porcelain` was clean.
+  Paddock returned no commits, untracked files, or PRs. Older guard versions
+  cannot resume or receive messages under the new runtime.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -158,5 +171,8 @@ lookup failures are reported separately from local workspace artifacts.
   model-backed planning, and trusted host MCP tools. The corresponding commands
   now fail closed; the App-backed Codex implementation path completed its test,
   commit, and draft PR.
-- Prevent investigation agents from changing checkout metadata such as file
-  modes while preserving writable home and build scratch space.
+- Recheck Claude's native turn and follow-up under a version-4 root-owned
+  checkout. Its version-3 model path and version-4 Codex metadata boundary
+  have passed independently.
+- Define retention and distribution for task-specific investigation images
+  beyond the local Docker-backed gateway.

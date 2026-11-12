@@ -99,10 +99,19 @@ so changing the globally selected OpenShell gateway cannot redirect an existing 
 `runtime check` verifies the qualified CLI and gateway connectivity; task creation
 additionally validates the provider profile, credentials, image, and agent binary.
 
-Investigation tasks seed their private Git checkout before agent startup, then
-launch the agent and its native daemon under a second Landlock layer. Source
-file contents and the private Git database reject agent writes; its home, `/tmp`,
-Go cache, and Go module cache remain writable. Claude's inbox socket lives in
+Investigation tasks build a task-specific image from the pinned runtime image
+and exactly the selected Git commit and ancestry. The trusted host uses local
+Docker to make the checkout and private Git database root-owned, then pins the
+resulting image ID before OpenShell starts. The runtime image must already be
+present in the local Docker image store used by the gateway. The build context
+contains no private key or installation token. A remote gateway needs an image
+distribution step before it can run this profile.
+
+The agent runs as the ordinary `sandbox` user. Root ownership denies source
+content writes and metadata changes such as `chmod`; an additional Landlock
+layer denies source entry creation and protects the launcher as well as its
+native daemon. Home, `/tmp`, Go cache, and Go module cache remain writable.
+Claude's inbox socket lives in
 `/home/sandbox/.claude`, which trusted preparation sets to mode `0700` as
 required by Claude. The guard also denies socket creation in the
 checkout. Rebuild and pin the runtime image after updating Paddock; an older
@@ -110,23 +119,24 @@ image cannot launch a guarded Claude investigation. The trusted sandbox launcher
 enters the same Landlock rules before starting the agent; its lock and exit
 records live in a private home directory. Inspection of the same-UID launcher
 cannot restore source write rights. Preparation probes that the worktree rejects
-file and socket creation while scratch accepts them; failure stops launch. An
-older investigation task
+file and socket creation and file-mode changes while scratch accepts writes;
+failure stops launch. An older investigation task
 without the current verified guard cannot resume or receive a follow-up; create
 a new task. The OpenShell
 startup policy still limits the entire sandbox's host and network access.
-Guard version 3 leaves the launcher's executable readable to OpenShell's
+Guard version 4 leaves the launcher's executable readable to OpenShell's
 process identity check. A live App-backed Claude investigation completed a
-read-only turn and a native inbox follow-up under this guard.
-Linux Landlock does not restrict metadata operations such as `chmod`; a live
-probe could change the mode of a temporary worktree file. Investigation tasks
-cannot push with their read-only GitHub token, but strict worktree metadata
-immutability still needs a separate ownership or staging design.
+read-only turn and a native inbox follow-up under the preceding guard; a live
+Codex turn under version 4 denied `chmod` and source creation and returned no
+code artifacts. Investigation tasks cannot push with their read-only GitHub
+token. Keep task-specific images while their sandboxes may resume; the current
+worktree collector does not remove the immutable image layer separately.
 OpenShell 0.1.6 accepts live network-policy changes, but its filesystem and
 process policy is fixed when the workload starts. A credential-free probe with
 `process.run_as_user: "1500"` showed that both ordinary exec and the gateway
 uploader used UID 1500, so selecting another workload UID does not give the
-checkout a separate owner. The probe sandbox was deleted.
+checkout a separate owner. Image construction supplies the ownership boundary
+before the sandbox starts. The probe sandbox was deleted.
 
 ## Pasted images
 

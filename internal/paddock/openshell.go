@@ -446,6 +446,27 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 		return e
 	}
 	defer os.RemoveAll(dir)
+	// Bundle exactly the selected commit and its ancestry before creating the
+	// sandbox. A per-task image can then make investigation source root-owned.
+	seed := filepath.Join(dir, "seed.git")
+	bundle := filepath.Join(dir, "seed.bundle")
+	if _, e = git(ctx, dir, "init", "--bare", seed); e != nil {
+		return e
+	}
+	if _, e = git(ctx, seed, "-c", "core.hooksPath="+os.DevNull, "fetch", "--no-tags", t.Repo, t.BaseCommit+":refs/heads/seed"); e != nil {
+		return e
+	}
+	if _, e = git(ctx, seed, "bundle", "create", bundle, "refs/heads/seed"); e != nil {
+		return e
+	}
+	image := c.Image
+	if t.Provenance.Profile == "investigation" {
+		image, e = buildInvestigationImage(ctx, c.Image, bundle, *t, dir)
+		if e != nil {
+			return e
+		}
+		t.OpenShell.Config.Image = image
+	}
 	if t.OpenShell.Provider != "" {
 		profile := filepath.Join(dir, "github.json")
 		if e = writeJSONAtomic(profile, githubProfileForExecution(t.OpenShell.Repository, t.OpenShell.Provider, t.Provenance.Profile)); e != nil {
@@ -463,7 +484,7 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 	}
 	// Retain the workload layer on stop. No host bind mounts, Git credential
 	// helpers, personal home, Docker socket, or gateway credentials enter it.
-	args := []string{"sandbox", "create", "--name", t.OpenShell.Name, "--from", c.Image, "--policy", c.Policy}
+	args := []string{"sandbox", "create", "--name", t.OpenShell.Name, "--from", image, "--policy", c.Policy}
 	if t.OpenShell.Provider != "" {
 		args = append(args, "--provider", t.OpenShell.Provider)
 	}
@@ -493,21 +514,10 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 	if _, e = c.call(ctx, "settings", "set", t.OpenShell.Name, "--key", "agent_policy_proposals_enabled", "--value", "true"); e != nil {
 		return fmt.Errorf("enable OpenShell policy advisor: %w", e)
 	}
-	// Use a private temporary Git database to bundle exactly the selected commit
-	// and its ancestry, including local unpushed bases; copy no Git configuration.
-	seed := filepath.Join(dir, "seed.git")
-	bundle := filepath.Join(dir, "seed.bundle")
-	if _, e = git(ctx, dir, "init", "--bare", seed); e != nil {
-		return e
-	}
-	if _, e = git(ctx, seed, "-c", "core.hooksPath="+os.DevNull, "fetch", "--no-tags", t.Repo, t.BaseCommit+":refs/heads/seed"); e != nil {
-		return e
-	}
-	if _, e = git(ctx, seed, "bundle", "create", bundle, "refs/heads/seed"); e != nil {
-		return e
-	}
-	if _, e = c.call(ctx, "sandbox", "upload", t.OpenShell.Name, bundle, "/sandbox/seed.bundle"); e != nil {
-		return e
+	if t.Provenance.Profile != "investigation" {
+		if _, e = c.call(ctx, "sandbox", "upload", t.OpenShell.Name, bundle, "/sandbox/seed.bundle"); e != nil {
+			return e
+		}
 	}
 	bootstrap := *t
 	bootstrap.Worktree = "/sandbox"
@@ -528,12 +538,27 @@ rm /sandbox/seed.bundle
 mkdir -p /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
 chmod 700 /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
 `
+	if t.Provenance.Profile == "investigation" {
+		script = `set -eu
+umask 077
+git config --global --add safe.directory /sandbox/worktree
+git config --global --add safe.directory /sandbox/repository.git
+if [ -n "$1" ]; then gh auth setup-git; fi
+mkdir -p /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
+chmod 700 /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
+`
+	}
 	remoteURL := ""
 	if t.OpenShell.Provider != "" {
 		remoteURL = "https://github.com/" + t.OpenShell.Repository + ".git"
 	}
 	if _, e = sandboxOutput(ctx, bootstrap, "/bin/sh", "-c", script, "paddock", remoteURL, t.Branch, t.OpenShell.GitAuthorName, t.OpenShell.GitAuthorEmail); e != nil {
 		return e
+	}
+	if t.Provenance.Profile == "investigation" {
+		if e = sandboxWorkspaceIdentity(ctx, *t); e != nil {
+			return fmt.Errorf("investigation image checkout is invalid: %w", e)
+		}
 	}
 	if _, e = sandboxOutput(ctx, *t, t.Session.AgentPath, "--version"); e != nil {
 		return fmt.Errorf("sandbox image must provide %s: %w", t.Session.AgentPath, e)

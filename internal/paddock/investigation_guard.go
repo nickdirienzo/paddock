@@ -9,7 +9,7 @@ import (
 )
 
 const investigationGuardDir = "/sandbox/.paddock/guard"
-const investigationGuardVersion = 3
+const investigationGuardVersion = 4
 
 func investigationGuardReady(t Task) bool {
 	return t.OpenShell != nil && t.OpenShell.ReadOnlyGuard && t.OpenShell.ReadOnlyGuardVersion >= investigationGuardVersion
@@ -107,6 +107,22 @@ for path, should_work in ((source, False), (home, True)):
         sock.close()`
 	if _, err := sandboxOutput(ctx, bootstrap, "/usr/bin/python3", investigationGuardDir+"/exec.py", "/usr/bin/python3", "-c", socketProbe); err != nil {
 		return fmt.Errorf("investigation socket guard failed its startup probe: %w", err)
+	}
+	modeProbe := `import os, stat
+path = '/sandbox/worktree/.git'
+original = os.stat(path)
+if original.st_uid == os.geteuid():
+    raise RuntimeError('investigation checkout is owned by the agent')
+mode = stat.S_IMODE(original.st_mode)
+try:
+    os.chmod(path, mode ^ stat.S_IXUSR)
+except PermissionError:
+    pass
+else:
+    os.chmod(path, mode)
+    raise RuntimeError('investigation can change checkout metadata')`
+	if _, err := sandboxOutput(ctx, bootstrap, "/usr/bin/python3", investigationGuardDir+"/exec.py", "/usr/bin/python3", "-c", modeProbe); err != nil {
+		return fmt.Errorf("investigation metadata guard failed its startup probe: %w", err)
 	}
 	return nil
 }
