@@ -144,6 +144,16 @@ changed.
   failed with `Permission denied`, and `git status --porcelain` was clean.
   Paddock returned no commits, untracked files, or PRs. Older guard versions
   cannot resume or receive messages under the new runtime.
+- A follow-up credential-free OpenShell probe made `/sandbox` root-owned and
+  left `/sandbox/.paddock` writable for the agent. It denied both checkout
+  rename and parent `chmod`. Guard version 5 applies and verifies that parent
+  ownership, closing the remaining same-user helper-process rename path.
+- App-backed Codex investigation `a81dabec08d5347fc5089ec7` used pinned
+  image `sha256:e0f7d6d02adc93f88049b9ea23d8831efd00a1cfce482b2e83aae2cc8eb2a86c`.
+  Its native turn reported file creation, Unix socket binding, `chmod`, and
+  checkout rename denied, then a clean `git status --porcelain`. A separate
+  unguarded OpenShell inspection confirmed UID 0 owns `/sandbox`, the checkout,
+  and Git database; only `/sandbox/.paddock` was UID 1000 and writable.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -171,7 +181,7 @@ lookup failures are reported separately from local workspace artifacts.
   model-backed planning, and trusted host MCP tools. The corresponding commands
   now fail closed; the App-backed Codex implementation path completed its test,
   commit, and draft PR.
-- Recheck Claude's native turn and follow-up under a version-4 root-owned
+- Recheck Claude's native turn and follow-up under a version-5 root-owned
   checkout. Its version-3 model path and version-4 Codex metadata boundary
   have passed independently.
 - Define retention and distribution for task-specific investigation images

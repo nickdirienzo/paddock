@@ -46,7 +46,7 @@ func buildInvestigationImage(ctx context.Context, baseImage, bundle string, t Ta
 	if err := os.WriteFile(filepath.Join(buildDir, "prepare.py"), []byte(investigationImagePreparation), 0600); err != nil {
 		return "", err
 	}
-	dockerfile := "FROM " + baseTag + "\nUSER root\nCOPY seed.bundle /sandbox/seed.bundle\nCOPY prepare.json prepare.py /tmp/\nRUN python3 /tmp/prepare.py && rm /tmp/prepare.py /tmp/prepare.json\nUSER sandbox\nWORKDIR /sandbox\n"
+	dockerfile := "FROM " + baseTag + "\nUSER root\nCOPY seed.bundle /sandbox/seed.bundle\nCOPY prepare.json prepare.py /tmp/\nRUN python3 /tmp/prepare.py && rm /tmp/prepare.py /tmp/prepare.json\nUSER sandbox\nWORKDIR /home/sandbox\n"
 	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0600); err != nil {
 		return "", err
 	}
@@ -75,6 +75,7 @@ func dockerForInvestigation(ctx context.Context, args ...string) ([]byte, error)
 
 const investigationImagePreparation = `import json
 import os
+import pwd
 import subprocess
 
 with open('/tmp/prepare.json') as source:
@@ -96,4 +97,11 @@ git('--git-dir=' + root, 'config', 'user.name', task['name'])
 git('--git-dir=' + root, 'config', 'user.email', task['email'])
 git('--git-dir=' + root, 'worktree', 'add', '-b', task['branch'], '/sandbox/worktree', 'refs/heads/seed')
 os.remove('/sandbox/seed.bundle')
+user = pwd.getpwnam('sandbox')
+for path in ('/sandbox/go-cache', '/sandbox/go-path', '/sandbox/.paddock'):
+    os.makedirs(path, exist_ok=True)
+    os.chown(path, user.pw_uid, user.pw_gid)
+    os.chmod(path, 0o700)
+os.chown('/sandbox', 0, 0)
+os.chmod('/sandbox', 0o755)
 `

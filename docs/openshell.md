@@ -101,14 +101,15 @@ additionally validates the provider profile, credentials, image, and agent binar
 
 Investigation tasks build a task-specific image from the pinned runtime image
 and exactly the selected Git commit and ancestry. The trusted host uses local
-Docker to make the checkout and private Git database root-owned, then pins the
+Docker to make `/sandbox`, the checkout, and private Git database root-owned, then pins the
 resulting image ID before OpenShell starts. The runtime image must already be
 present in the local Docker image store used by the gateway. The build context
 contains no private key or installation token. A remote gateway needs an image
 distribution step before it can run this profile.
 
 The agent runs as the ordinary `sandbox` user. Root ownership denies source
-content writes and metadata changes such as `chmod`; an additional Landlock
+content writes, checkout renames, and metadata changes such as `chmod`. Task
+scratch directories under `/sandbox` remain owned by the agent. An additional Landlock
 layer denies source entry creation and protects the launcher as well as its
 native daemon. Home, `/tmp`, Go cache, and Go module cache remain writable.
 Claude's inbox socket lives in
@@ -119,12 +120,12 @@ image cannot launch a guarded Claude investigation. The trusted sandbox launcher
 enters the same Landlock rules before starting the agent; its lock and exit
 records live in a private home directory. Inspection of the same-UID launcher
 cannot restore source write rights. Preparation probes that the worktree rejects
-file and socket creation and file-mode changes while scratch accepts writes;
+file and socket creation, file-mode changes, and checkout renames while scratch accepts writes;
 failure stops launch. An older investigation task
 without the current verified guard cannot resume or receive a follow-up; create
 a new task. The OpenShell
 startup policy still limits the entire sandbox's host and network access.
-Guard version 4 leaves the launcher's executable readable to OpenShell's
+Guard version 5 leaves the launcher's executable readable to OpenShell's
 process identity check. A live App-backed Claude investigation completed a
 read-only turn and a native inbox follow-up under the preceding guard; a live
 Codex turn under version 4 denied `chmod` and source creation and returned no

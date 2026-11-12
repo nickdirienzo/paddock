@@ -9,7 +9,7 @@ import (
 )
 
 const investigationGuardDir = "/sandbox/.paddock/guard"
-const investigationGuardVersion = 4
+const investigationGuardVersion = 5
 
 func investigationGuardReady(t Task) bool {
 	return t.OpenShell != nil && t.OpenShell.ReadOnlyGuard && t.OpenShell.ReadOnlyGuardVersion >= investigationGuardVersion
@@ -51,6 +51,24 @@ for name in ('paddock-agent', 'paddock-claude-message'):
 		if _, err := sandboxOutput(ctx, bootstrap, "python3", "-c", check); err != nil {
 			return fmt.Errorf("Claude investigation requires an OpenShell image with the home-directory inbox; rebuild the runtime image: %w", err)
 		}
+	}
+	// The parent must be protected by Unix ownership too. A same-user,
+	// unguarded helper process could otherwise rename the root-owned checkout.
+	parentProbe := `import os
+parent = '/sandbox'
+checkout = '/sandbox/worktree'
+renamed = '/sandbox/worktree-paddock-probe'
+if os.stat(parent).st_uid == os.geteuid():
+    raise RuntimeError('investigation parent is owned by the agent')
+try:
+    os.rename(checkout, renamed)
+except PermissionError:
+    pass
+else:
+    os.rename(renamed, checkout)
+    raise RuntimeError('investigation can rename checkout')`
+	if _, err := sandboxOutput(ctx, bootstrap, "/usr/bin/python3", "-c", parentProbe); err != nil {
+		return fmt.Errorf("investigation parent ownership guard failed its startup probe: %w", err)
 	}
 	if _, err := sandboxOutput(ctx, bootstrap, "mkdir", "-p", investigationGuardDir, "/sandbox/go-cache", "/sandbox/go-path"); err != nil {
 		return err
