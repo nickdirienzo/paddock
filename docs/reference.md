@@ -27,7 +27,9 @@ install -m 755 bin/paddock ~/.local/bin/paddock
 ~/.local/bin/paddock skill setup
 ```
 
-Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting executable has no language runtime or database dependency. Keep the executable at a stable path while tasks are running: their delegation instructions refer to it.
+Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting
+executable has no language runtime or database dependency. Keep the executable
+at a stable path while tasks are running because host task supervisors use it.
 
 ```sh
 cd /path/to/any/git/repository
@@ -50,7 +52,14 @@ paddock run --repo project --prompt-file goal.md
 pbpaste | paddock run --repo project -
 ```
 
-The directory must have an existing Git commit. No repository registration is needed. Default agent: `codex`. Default terminal: use a reachable local Rex server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to choose explicitly. An explicit backend failure never silently launches another session elsewhere. Ordinary `paddock run` also selects the new session in the connected Rex app when Remote Control is enabled. Use `--detach` to leave it in the background. JSON output, delegation, and runs invoked from an existing Paddock agent stay in the background; Screen continues to launch detached.
+The directory must have an existing Git commit. No repository registration is
+needed. Default agent: `codex`. Default terminal: use a reachable local Rex
+server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to
+choose explicitly. An explicit backend failure never silently launches another
+session elsewhere. Ordinary `paddock run` also selects the new session in the
+connected Rex app when Remote Control is enabled. Use `--detach` to leave it in
+the background. JSON output and delegation stay in the background; Screen
+continues to launch detached.
 
 Bare repositories are supported too. Point at the bare repository itself; Paddock creates a separate task worktree from it:
 
@@ -62,7 +71,7 @@ A plain directory named `project` next to `project.git` is not automatically a c
 
 ### Interactive task launcher
 
-`paddock new` opens a terminal form with a repository picker, agent and runtime selectors,
+`paddock new` opens a terminal form with a repository picker, agent selector,
 multiline prompt, and Start task button. Registered repositories are listed by
 name; the current project is preselected when available. **Other repository…**
 accepts a registered name or a path, including `~/` and bare repositories.
@@ -147,7 +156,7 @@ the approved author list, and asks agents to report watch and poller readiness w
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions, resumes stopped Codex and Claude conversations in either runtime when their
+routes comments to online sessions, resumes stopped OpenShell Codex and Claude conversations when their
 identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 
@@ -227,18 +236,24 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 
 | Command | Behavior |
 | --- | --- |
-| `paddock tp` | Open or resume the registry's persistent Team Principal conversation; see [Team Principal](tp.md). |
 | `paddock new` | Open an interactive task form and display the created Rex session. |
 | `paddock rex setup\|remove` | Install or remove the floating task launcher and shortcut in Rex's configuration. |
-| `paddock run <prompt\|->` | Persist a task, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
+| `paddock run <prompt\|->` | Persist a task with an authorized identity and profile, create its worktree, launch the agent in OpenShell, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
-| `paddock show <id>` | Show the prompt, parent, children, repository, base commit, branch, worktree, terminal, and exit status. |
+| `paddock show <id>` | Show provenance, prompt, task and native turn state, pending access requests, terminal, and exit status. |
+| `paddock artifacts <id>` | Report commits, workspace changes, and PRs for a task. |
+| `paddock message <id> <text>` | Send a native follow-up with an optional idempotency key. |
+| `paddock identity create\|show\|verify` | Create, inspect, and verify a named agent identity. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
 Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `--json` for scripting. Prompts are passed as argument values, read from stdin with `-`, or loaded with `--prompt-file <path>`; they are never evaluated as shell code. Use `--` before a prompt that begins with a dash.
 
-`run` and `delegate` accept `--agent codex|claude`, `--terminal auto|rex|screen`, `--repo <directory>`, and `--base <ref>`. Options may precede or follow the prompt.
+`run` and `delegate` accept `--agent codex|claude`,
+`--terminal auto|rex|screen`, `--repo <directory>`, `--base <ref>`,
+`--identity <name>`, and `--profile investigation|implementation`. For
+integration calls, also use `--requester`, `--requester-source`, `--external-id`,
+and `--context-file`. Options may precede or follow the prompt.
 
 ### Delegation
 
@@ -253,12 +268,12 @@ Independent context alone does not require that lifecycle.
 ```sh
 # From your own shell:
 paddock delegate --parent <id> --agent claude "Implement the frontend"
-
-# Inside an agent launched by Paddock:
-paddock delegate --agent claude "Implement the frontend"
 ```
 
-The supervisor exports `PADDOCK_TASK_ID`, `PADDOCK_PARENT_TASK_ID`, and `PADDOCK_HOME`, and adds Paddock's executable directory to PATH. The agent prompt includes an absolute delegation command with an explicit parent ID and registry path, so delegation can also work when an agent filters environment variables. The agent's ordinary tool approvals still apply.
+The host owns delegation. An OpenShell agent receives its task ID but cannot
+invoke the host Paddock CLI. Ask the host operator to create a durable child
+when one is authorized; use native subagents for short reviews inside the
+current task.
 
 Use `paddock message TASK_ID "instruction or result"` to communicate with an existing
 Paddock agent. Terminal typing can interfere with the user's input and is not a
@@ -411,14 +426,14 @@ OpenShell owns sandbox isolation and credential substitution. Paddock owns task 
 ```sh
 mise run build
 mise run check
-# Real terminal integration; requires access to the terminal server:
-PADDOCK_LIVE_TERMINAL=screen mise exec -- go test ./internal/paddock -run TestLiveTerminalLifecycle -v -count=1
-PADDOCK_LIVE_TERMINAL=rex mise exec -- go test ./internal/paddock -run TestLiveTerminalLifecycle -v -count=1
-# Native Codex hook trust checks; isolated config, no model calls or hook execution:
-PADDOCK_LIVE_CODEX=1 mise exec -- go test ./internal/paddock -run TestLiveCodexHookTrust -v -count=1
 ```
 
-Tests cover restart persistence, parent-child lookup, concurrent writers in separate processes, atomic readers, lock recovery after process death, corrupt records, repository/default-ref resolution, unchanged source checkouts, linked worktrees, repository trust and revocation, supervisor exits, literal prompt handling, terminal observation failures, and Rex metadata recovery. Live tests run real Paddock subprocesses in real terminals with deterministic fixture agents; the parent invokes the CLI to delegate its child. Rex tests also verify the agent owns the foreground process group. These tests do not consume model subscriptions.
+Tests cover restart persistence, parent-child lookup, concurrent writers,
+atomic state, repository resolution, identity ownership and routing, immutable
+provenance, credential boundaries, terminal observation, lifecycle recovery,
+and profile authorization. Legacy host-agent terminal tests are skipped while
+host LLM execution is unavailable. Live OpenShell and GitHub App checks are
+recorded in the [identity acceptance notes](identity-acceptance.md).
 
 For development and wrappers, `PADDOCK_CODEX_BIN`, `PADDOCK_CLAUDE_BIN`, `PADDOCK_REX_BIN`, and `PADDOCK_SCREEN_BIN` override executable locations. Values are executable paths, not shell command strings.
 

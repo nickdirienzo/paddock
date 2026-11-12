@@ -166,6 +166,10 @@ The full Go suite
 passes with local HTTP fixtures.
 
 The host-only agent, planner, and MCP execution paths now reject launches.
+The bundled agent guide and current operator reference now describe OpenShell
+only. `paddock skill show` includes the host-CLI boundary, and
+`paddock tp --help` rejects the retired host command. Historical TP and planner
+notes are archived separately.
 The internal locked-resume path and native message path also reject legacy host
 task records. Legacy host watches report `unsupported` and leave new comments
 pending, so a GitHub comment or follow-up cannot restart a host agent.

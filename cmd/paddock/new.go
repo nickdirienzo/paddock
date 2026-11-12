@@ -22,10 +22,9 @@ const newHelp = `Usage: paddock new [--repo name-or-path] [--agent codex|claude]
                    [--runtime openshell] [--base ref] [--terminal auto|rex|screen]
                    [--client Rex-client-id]
 
-Choose a repository, agent, and runtime, then write a multiline task description.
+Choose a repository and agent, then write a multiline task description.
 Use Tab / Shift-Tab to move between fields, Enter for a new line in the
-description, and Escape or Ctrl-C to cancel. Runtime starts at your configured
-default.
+description, and Escape or Ctrl-C to cancel. Agent execution uses OpenShell.
 Install a floating Rex launcher with: paddock rex setup
 `
 

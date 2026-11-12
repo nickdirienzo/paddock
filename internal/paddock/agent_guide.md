@@ -1,13 +1,5 @@
 # Paddock
 
-`paddock tp` opens the registry's persistent Team Principal, a host Codex or
-Claude conversation about all agents working on Paddock tasks across projects.
-TP refreshes task/PR state through the existing commands and saves confirmed
-project decisions in its retained worktree's projects/ directory. It launches
-authorized implementation with `paddock run --repo PROJECT --json`, preserving
-the configured runtime. It does not implement work in the TP repository or start
-new work without user direction. Ordinary tasks keep their existing role.
-
 Paddock runs local coding tasks in Git worktrees and persistent terminals. Use the
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.
@@ -27,18 +19,19 @@ Run the following coordination commands on the host, not through a sandbox escap
 
 ## Find your context
 
-When `PADDOCK_TASK_ID` is set, you already own a Paddock task. Work in its current
-worktree; don't create another task for the same assignment. `PADDOCK_HOME` selects
-the registry. Keep that environment when invoking Paddock.
+When `PADDOCK_TASK_ID` is set inside OpenShell, you already own a Paddock task.
+Work in its current worktree; don't create another task for the same assignment.
+The host operator uses `PADDOCK_HOME` to select the registry and runs the
+coordination commands below. The sandbox does not have the host Paddock CLI.
 
 ```sh
-paddock show "$PADDOCK_TASK_ID" --json
+paddock show TASK_ID --json
 paddock tasks --json
 ```
 
 Outside a task, `paddock repo list --json` shows global aliases. A command such as
-`paddock run --repo mirage "Implement the requested change"` works from any directory.
-For a multiline goal, `paddock run --repo mirage -` reads stdin until EOF; paste the
+`paddock run --repo project "Implement the requested change"` works from any directory.
+For a multiline goal, `paddock run --repo project -` reads stdin until EOF; paste the
 prompt and press Ctrl-D. `--prompt-file goal.md` reads it from a file instead.
 There is no need to install skills or add Paddock instructions to each repository.
 Run `paddock --help` and `paddock github --help` for this installed version's options.
@@ -62,7 +55,7 @@ If native subagents are unavailable, use a bounded fresh-context invocation when
 supported for a short independent review; do not automatically escalate every review
 into a persistent Paddock task. Preserve repository requirements for independent review.
 
-For work that does warrant a durable child task:
+From the host, work that warrants a durable child task uses:
 
 ```sh
 paddock delegate --agent codex "Describe the independent task"
@@ -144,7 +137,7 @@ paddock github stop                 # stop service; retain all watches
 ```
 
 Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
-comments for resumable Codex and Claude tasks in either runtime wake the same saved conversation and worktree.
+comments for resumable Codex and Claude OpenShell tasks wake the same saved conversation and worktree.
 Tasks without a saved conversation ID remain offline, with comments pending and no
 eyes reaction; use `paddock resume TASK_ID` to recover the identity when possible. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
 or register a watch again; there is no automatic login service yet.
