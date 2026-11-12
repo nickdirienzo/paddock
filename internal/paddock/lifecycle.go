@@ -226,6 +226,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	}
 	if err = s.Store.update(id, func(v *Task) error {
 		v.Session.Generation++
+		v.Session.LastTurn = nil
 		v.Session.Resume = !retryInitial
 		v.Session.ResumeNotice = t.Session.ResumeNotice
 		if v.Session.Backend == "rex" && v.Session.ID != "" {

@@ -239,11 +239,29 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	}
 	stopMCP()
 	if t.RuntimeName() == "openshell" {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		// A disconnected transport does not prove that the remote agent exited.
 		if current, getErr := store.Get(t.ID); getErr == nil {
 			t = current
 		}
+		// Capture the last native turn before the sandbox stops. Integrations can
+		// still reconcile a clean exit after the native workspace is unavailable.
+		if t.Session.ConversationID != "" {
+			turnCtx, turnCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			turn, turnErr := NativeLastTurn(turnCtx, t)
+			turnCancel()
+			if turnErr != nil {
+				turn = AgentTurn{State: "unknown", Error: turnErr.Error()}
+			}
+			generation := t.Session.Generation
+			if snapshotErr := store.UpdateSession(t.ID, func(session *Session) {
+				if session.Generation == generation {
+					session.LastTurn = &turn
+				}
+			}); snapshotErr != nil {
+				fmt.Fprintln(os.Stderr, "could not save native turn state:", snapshotErr)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		release, leaseErr := store.taskLease(t.ID, "operation")
 		if leaseErr != nil {
 			message += "; task operation still active; sandbox retained"

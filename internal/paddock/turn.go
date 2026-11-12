@@ -12,6 +12,18 @@ import (
 //go:embed claude_turn.py
 var claudeTurnScript string
 
+// NativeLastTurn inspects only the pinned native conversation for this task.
+func NativeLastTurn(ctx context.Context, task Task) (AgentTurn, error) {
+	switch task.Session.Agent {
+	case "codex":
+		return CodexLastTurn(ctx, task)
+	case "claude":
+		return ClaudeLastTurn(ctx, task)
+	default:
+		return AgentTurn{State: "unknown"}, fmt.Errorf("unsupported native agent %q", task.Session.Agent)
+	}
+}
+
 // ClaudeLastTurn reads structural events from the pinned native transcript
 // inside OpenShell. The transcript itself never leaves the sandbox.
 func ClaudeLastTurn(ctx context.Context, task Task) (AgentTurn, error) {

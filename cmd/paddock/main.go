@@ -514,16 +514,9 @@ func run(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		var lastTurn *paddock.AgentTurn
+		lastTurn := t.Session.LastTurn
 		if t.RuntimeName() == "openshell" && t.OpenShell != nil && t.OpenShell.Ready && obs.State == "running" {
-			var turn paddock.AgentTurn
-			var turnErr error
-			switch t.Session.Agent {
-			case "codex":
-				turn, turnErr = paddock.CodexLastTurn(ctx, t)
-			case "claude":
-				turn, turnErr = paddock.ClaudeLastTurn(ctx, t)
-			}
+			turn, turnErr := paddock.NativeLastTurn(ctx, t)
 			if turnErr != nil {
 				turn.Error = turnErr.Error()
 			}

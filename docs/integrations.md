@@ -35,8 +35,13 @@ reports `last_turn.state` (`none`, `inProgress`, `completed`, `failed`,
 from the pinned native transcript inside OpenShell; a `turn_duration` following
 the latest user prompt proves completion. A queued follow-up remains
 `inProgress` until its own turn completes. A completed turn can coexist with a
-running interactive terminal. An inspection failure is `unknown` with an error,
-never inferred completion. The `blocked` flag means unresolved OpenShell access
+running interactive terminal. Before a native session stops, Paddock saves its
+last observed turn, or `unknown` if inspection fails, in the task record. Thus
+`show --json` retains that result after
+the sandbox stops and the calling service restarts. A resumed session clears
+the prior snapshot before new work begins. An inspection failure is `unknown`
+with an error, never inferred completion. The `blocked` flag means unresolved
+OpenShell access
 proposals exist; inspect `access_requests` and `last_turn` together because a
 proposal can remain pending after the agent finishes a turn. Claude's initial
 workspace trust dialog is a native approval and may show `last_turn.state:

@@ -50,25 +50,26 @@ type TaskProvenance struct {
 }
 
 type Session struct {
-	Generation     int    `json:"generation,omitempty"`
-	Resume         bool   `json:"resume,omitempty"`
-	ResumeNotice   string `json:"resume_notice,omitempty"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	AgentHome      string `json:"agent_home,omitempty"`
-	Agent          string `json:"agent"`
-	TrustProject   bool   `json:"trust_project,omitempty"`
-	AgentPath      string `json:"agent_path"`
-	Backend        string `json:"backend"`
-	TerminalPath   string `json:"terminal_path"`
-	Endpoint       string `json:"endpoint,omitempty"`
-	Name           string `json:"name"`
-	ID             string `json:"id,omitempty"`
-	GroupID        string `json:"group_id,omitempty"` // Rex session selected before creating a task tab
-	BlockID        string `json:"block_id,omitempty"`
-	WindowID       string `json:"window_id,omitempty"`
-	ExitCode       *int   `json:"exit_code,omitempty"`
-	StartedAt      string `json:"started_at,omitempty"`
-	EndedAt        string `json:"ended_at,omitempty"`
+	Generation     int        `json:"generation,omitempty"`
+	Resume         bool       `json:"resume,omitempty"`
+	ResumeNotice   string     `json:"resume_notice,omitempty"`
+	ConversationID string     `json:"conversation_id,omitempty"`
+	LastTurn       *AgentTurn `json:"last_turn,omitempty"` // last native turn observed before this session stopped
+	AgentHome      string     `json:"agent_home,omitempty"`
+	Agent          string     `json:"agent"`
+	TrustProject   bool       `json:"trust_project,omitempty"`
+	AgentPath      string     `json:"agent_path"`
+	Backend        string     `json:"backend"`
+	TerminalPath   string     `json:"terminal_path"`
+	Endpoint       string     `json:"endpoint,omitempty"`
+	Name           string     `json:"name"`
+	ID             string     `json:"id,omitempty"`
+	GroupID        string     `json:"group_id,omitempty"` // Rex session selected before creating a task tab
+	BlockID        string     `json:"block_id,omitempty"`
+	WindowID       string     `json:"window_id,omitempty"`
+	ExitCode       *int       `json:"exit_code,omitempty"`
+	StartedAt      string     `json:"started_at,omitempty"`
+	EndedAt        string     `json:"ended_at,omitempty"`
 }
 
 type Observation struct {
