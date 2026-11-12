@@ -5,7 +5,30 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/nickdirienzo/paddock/internal/paddock"
 )
+
+func TestPrintTaskDistinguishesLogicalIdentityAndGitHubActor(t *testing.T) {
+	task := paddock.Task{Provenance: paddock.TaskProvenance{Caller: "501:engineer", Requester: "user-123", RequesterSource: "service-api", Identity: "investigator", Profile: "investigation", Capabilities: []string{"repository.read", "analysis"}}, OpenShell: &paddock.OpenShellTask{Name: "pd-task"}}
+	var output bytes.Buffer
+	printTask(&output, task)
+	for _, field := range []string{"Local caller: 501:engineer", "Asserted requester: user-123 (service-api)", "Paddock identity: investigator", "Profile: investigation", "Capabilities: repository.read, analysis"} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("missing %q in %s", field, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "GitHub actor:") {
+		t.Fatalf("unbacked identity was displayed as a GitHub actor: %s", output.String())
+	}
+	task.Provenance.GitHubActor = "helper[bot]"
+	task.OpenShell.Repository = "team/project"
+	output.Reset()
+	printTask(&output, task)
+	if !strings.Contains(output.String(), "GitHub actor: helper[bot] (team/project)") {
+		t.Fatal(output.String())
+	}
+}
 
 func TestCLIParsing(t *testing.T) {
 	o, p, e := parse([]string{"prompt with ; $(literal)", "--agent", "claude", "--json"}, "agent json")
@@ -66,7 +89,25 @@ func TestHelpDoesNotNeedRepositoryOrState(t *testing.T) {
 	if e := run([]string{"--help"}, &out); e != nil {
 		t.Fatal(e)
 	}
-	if !strings.Contains(out.String(), "delegate") {
+	if !strings.Contains(out.String(), "delegate") || !strings.Contains(out.String(), "access") {
+		t.Fatal(out.String())
+	}
+}
+
+func TestHostPlannerCLIIsUnavailableWithoutStateChanges(t *testing.T) {
+	t.Setenv("PADDOCK_HOME", "/this/path/must/not/be/created")
+	if err := run([]string{"orchestrate", "--id", "probe", "route this"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "OpenShell") {
+		t.Fatal(err)
+	}
+}
+
+func TestAccessHelpDoesNotNeedState(t *testing.T) {
+	t.Setenv("PADDOCK_HOME", "/this/path/must/not/be/created")
+	var out bytes.Buffer
+	if err := run([]string{"access", "--help"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "access approve") {
 		t.Fatal(out.String())
 	}
 }

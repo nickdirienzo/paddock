@@ -23,6 +23,9 @@ func (s Service) gcSandbox(ctx context.Context, t Task, config LifecycleConfig, 
 	if t.Status == "running" || t.Status == "starting" || t.Status == "preparing" {
 		return fail(fmt.Errorf("task may still be running"))
 	}
+	if t.Provenance.Profile == "investigation" && t.OpenShell != nil && t.OpenShell.ReadOnlyGuardVersion >= 4 {
+		return fail(fmt.Errorf("root-owned investigation checkout is retained in its task image; per-worktree collection is unavailable"))
+	}
 	release, e := s.Store.taskLease(t.ID, "process")
 	if e != nil {
 		return fail(e)

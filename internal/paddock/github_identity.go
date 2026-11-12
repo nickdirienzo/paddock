@@ -36,6 +36,9 @@ func (s GitHubState) ResolveGitHubIdentity(repo string) (GitHubIdentityBinding, 
 			if !exists {
 				return GitHubIdentityBinding{}, i, fmt.Errorf("route %s refers to missing identity %s", pattern, name)
 			}
+			if i.Disabled {
+				return GitHubIdentityBinding{}, i, fmt.Errorf("identity %q is disabled", name)
+			}
 			return bindGitHubIdentity(name, i), i, nil
 		}
 	}
@@ -43,12 +46,16 @@ func (s GitHubState) ResolveGitHubIdentity(repo string) (GitHubIdentityBinding, 
 }
 func (s GitHubState) boundIdentity(b GitHubIdentityBinding) (GitHubIdentity, error) {
 	i, ok := s.Identities[b.Name]
-	if !ok || bindGitHubIdentity(b.Name, i) != b {
+	if !ok || i.Disabled || bindGitHubIdentity(b.Name, i) != b {
 		return GitHubIdentity{}, fmt.Errorf("queued reply identity %q was removed or changed; restore that principal before sending", b.Name)
 	}
 	return i, nil
 }
 func (s *Store) RouteGitHubIdentity(pattern, name string) error {
+	caller, err := LocalCaller()
+	if err != nil {
+		return err
+	}
 	pattern = strings.ToLower(pattern)
 	valid := pattern == "*" || githubRepoName.MatchString(pattern)
 	if owner, ok := strings.CutSuffix(pattern, "/*"); ok {
@@ -58,8 +65,18 @@ func (s *Store) RouteGitHubIdentity(pattern, name string) error {
 		return fmt.Errorf("route must be owner/repository, owner/*, or *")
 	}
 	return s.UpdateGitHub(func(v *GitHubState) error {
-		if _, ok := v.Identities[name]; !ok {
+		identity, ok := v.Identities[name]
+		if !ok {
 			return fmt.Errorf("unknown identity %q", name)
+		}
+		if identity.Owner != "" && identity.Owner != caller {
+			return fmt.Errorf("caller is not the owner of identity %q", name)
+		}
+		if previousName, exists := v.Routes[pattern]; exists {
+			previous := v.Identities[previousName]
+			if previous.Owner != "" && previous.Owner != caller {
+				return fmt.Errorf("caller is not the owner of repository route %q", pattern)
+			}
 		}
 		v.Routes[pattern] = name
 		return nil

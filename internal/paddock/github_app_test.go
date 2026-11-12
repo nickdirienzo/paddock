@@ -243,3 +243,68 @@ func TestGitHubAppKeyFormats(t *testing.T) {
 		t.Fatal("unsafe parse error")
 	}
 }
+
+func TestNamedIdentityKeysDoNotOverwriteEachOther(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, first := appKeyFixture(t)
+	_, second := appKeyFixture(t)
+	one, err := ImportGitHubAppKeyBytesForIdentity(42, "mozzie", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := ImportGitHubAppKeyBytesForIdentity(42, "seamus", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Fatal("identity key paths alias")
+	}
+	if _, err := ImportGitHubAppKeyBytesForIdentity(42, "mozzie", second); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := os.ReadFile(two)
+	if err != nil || string(retained) != string(first) {
+		t.Fatal("other identity key changed", err)
+	}
+	if err := RemoveGitHubAppKeyForIdentity(42, "mozzie", one); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(one); !os.IsNotExist(err) {
+		t.Fatal("detached key remains", err)
+	}
+	if _, err := os.Stat(two); err != nil {
+		t.Fatal("other identity key removed", err)
+	}
+}
+
+func TestInstallationRepositoryInventory(t *testing.T) {
+	_, pem := appKeyFixture(t)
+	t.Setenv("PADDOCK_GITHUB_PRIVATE_KEY", string(pem))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/99/access_tokens":
+			json.NewEncoder(w).Encode(map[string]any{"token": "ghs_fixture", "expires_at": time.Now().Add(time.Hour)})
+		case "/installation/repositories":
+			if r.URL.Query().Get("per_page") != "100" || r.URL.Query().Get("page") != "1" {
+				t.Error("wrong pagination")
+			}
+			fmt.Fprint(w, `{"repositories":[{"full_name":"owner/one"},{"full_name":"owner/two"}]}`)
+		case "/users/mozziebot%5Bbot%5D", "/users/mozziebot[bot]":
+			fmt.Fprint(w, `{"id":351659889,"login":"mozziebot[bot]","type":"Bot"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	api := NewGitHubAPI(GitHubIdentity{Mode: "app", App: &GitHubAppConfig{AppID: 42, InstallationID: 99, KeyEnvironment: true}})
+	api.app.baseURL = server.URL
+	repos, err := api.InstallationRepositories(context.Background())
+	if err != nil || len(repos) != 2 || repos[0] != "owner/one" || repos[1] != "owner/two" {
+		t.Fatalf("repositories: %v %v", repos, err)
+	}
+	botID, err := api.BotUserID(context.Background(), "mozziebot[bot]")
+	if err != nil || botID != 351659889 {
+		t.Fatalf("bot actor: %d %v", botID, err)
+	}
+}

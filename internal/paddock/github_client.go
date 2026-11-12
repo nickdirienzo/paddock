@@ -15,9 +15,32 @@ import (
 )
 
 type GitHubIdentity struct {
-	Mode  string           `json:"mode"`
-	Login string           `json:"login"`
-	App   *GitHubAppConfig `json:"app,omitempty"`
+	Mode      string           `json:"mode"`
+	Login     string           `json:"login"`
+	App       *GitHubAppConfig `json:"app,omitempty"`
+	Owner     string           `json:"owner,omitempty"`
+	CreatedAt string           `json:"created_at,omitempty"`
+	Profiles  []string         `json:"profiles,omitempty"`
+	Disabled  bool             `json:"disabled,omitempty"`
+	BotUserID int64            `json:"bot_user_id,omitempty"`
+}
+
+func (g GitHubAPI) BotUserID(ctx context.Context, login string) (int64, error) {
+	if !githubLogin.MatchString(login) || !strings.HasSuffix(login, "[bot]") {
+		return 0, fmt.Errorf("invalid GitHub App bot login")
+	}
+	var user struct {
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	}
+	if err := g.request(ctx, "GET", "users/"+url.PathEscape(login), nil, &user); err != nil {
+		return 0, err
+	}
+	if user.ID < 1 || !strings.EqualFold(user.Login, login) || user.Type != "Bot" {
+		return 0, fmt.Errorf("GitHub returned a different bot actor")
+	}
+	return user.ID, nil
 }
 
 type PullRequest struct {
@@ -107,6 +130,65 @@ func (g GitHubAPI) AuthenticatedIdentity(ctx context.Context) (GitHubIdentity, e
 	return identity, g.ValidateIdentity(ctx)
 }
 
+// VerifyRepository confirms that the installation can read a selected repo.
+func (g GitHubAPI) VerifyRepository(ctx context.Context, repo string) error {
+	if !githubRepoName.MatchString(repo) {
+		return fmt.Errorf("invalid owner/repository")
+	}
+	var result struct {
+		FullName string `json:"full_name"`
+	}
+	if err := g.request(ctx, "GET", "repos/"+repo, nil, &result); err != nil {
+		return err
+	}
+	if !strings.EqualFold(result.FullName, repo) {
+		return fmt.Errorf("GitHub returned a different repository")
+	}
+	return nil
+}
+
+// VerifyExecutionProfile asks GitHub for the same repository-scoped token a
+// task would receive, then discards it. This catches missing installation
+// permissions before an agent launch without persisting a credential.
+func (g GitHubAPI) VerifyExecutionProfile(ctx context.Context, repo, profile string) error {
+	if !validProfile(profile) {
+		return fmt.Errorf("unknown execution profile %q", profile)
+	}
+	if g.app == nil {
+		return fmt.Errorf("identity has no GitHub App installation")
+	}
+	_, _, err := g.app.repositoryTokenForExecution(ctx, repo, profile)
+	return err
+}
+
+func (g GitHubAPI) InstallationRepositories(ctx context.Context) ([]string, error) {
+	if g.Identity.Mode != "app" || g.app == nil {
+		return nil, fmt.Errorf("identity has no GitHub App installation")
+	}
+	repos := []string{}
+	for page := 1; page <= 100; page++ {
+		var result struct {
+			Repositories []struct {
+				FullName string `json:"full_name"`
+			} `json:"repositories"`
+		}
+		path := fmt.Sprintf("installation/repositories?per_page=100&page=%d", page)
+		if err := g.app.request(ctx, "GET", path, nil, &result); err != nil {
+			return nil, err
+		}
+		for _, repo := range result.Repositories {
+			if !githubRepoName.MatchString(repo.FullName) {
+				return nil, fmt.Errorf("GitHub returned invalid repository access")
+			}
+			repos = append(repos, repo.FullName)
+		}
+		if len(result.Repositories) < 100 {
+			return repos, nil
+		}
+	}
+	return nil, fmt.Errorf("installation repository pagination limit reached")
+}
+
 func (g GitHubAPI) request(ctx context.Context, method, path string, body, result any) error {
 	if !strings.HasPrefix(path, "repos/") && !strings.HasPrefix(path, "users/") && path != "user" && path != "installation/repositories?per_page=1" {
 		return fmt.Errorf("unsupported GitHub API path")
@@ -172,6 +254,24 @@ func (g GitHubAPI) Pull(ctx context.Context, repo string, n int) (PullRequest, e
 	}
 	err := g.request(ctx, "GET", fmt.Sprintf("repos/%s/pulls/%d", repo, n), nil, &pr)
 	return pr, err
+}
+
+// PullsForBranch includes closed PRs so artifacts remain discoverable after a
+// task's branch has been merged or its watch has been removed.
+func (g GitHubAPI) PullsForBranch(ctx context.Context, repo, branch string) ([]PullRequest, error) {
+	if !githubRepoName.MatchString(repo) || branch == "" || len(branch) > 256 {
+		return nil, fmt.Errorf("invalid repository or branch")
+	}
+	owner, _, _ := strings.Cut(repo, "/")
+	query := url.Values{"head": {owner + ":" + branch}, "state": {"all"}, "per_page": {"100"}}
+	var pulls []PullRequest
+	if err := g.request(ctx, "GET", "repos/"+repo+"/pulls?"+query.Encode(), nil, &pulls); err != nil {
+		return nil, err
+	}
+	if len(pulls) == 100 {
+		return nil, fmt.Errorf("pull request result limit reached for %s", branch)
+	}
+	return pulls, nil
 }
 func (g GitHubAPI) UserID(ctx context.Context, login string) (int64, error) {
 	if !githubLogin.MatchString(login) {

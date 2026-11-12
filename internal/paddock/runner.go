@@ -23,7 +23,12 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 		"Use --agent claude for Claude Code. Children start from the repository default branch; pass --base " + t.Branch + " to include committed parent work. Use paddock show to inspect children. " +
 		"Communicate with existing Paddock agents through paddock message; never use terminal typing or simulated Enter as agent messaging."
 	if t.RuntimeName() == "openshell" {
-		prompt = t.Prompt + "\n\nPaddock task " + t.ID + ". This agent runs inside OpenShell. Work in " + t.Worktree + ". Use ordinary git and gh; GitHub requests authenticate as " + t.OpenShell.Identity.Login + " and are restricted to " + t.OpenShell.Repository + ". Keep work on branch " + t.Branch + ". Prefer native subagents for short reviews. The host owns lifecycle and PR watches; do not create nested Paddock tasks or try to access host credentials."
+		prompt = t.Prompt + "\n\nPaddock task " + t.ID + ". This agent runs inside OpenShell. Work in " + t.Worktree + " on branch " + t.Branch + ". Prefer native subagents for short reviews. The host owns lifecycle and PR watches; do not create nested Paddock tasks or try to access host credentials. If OpenShell denies required network access, follow the policy-advisor instructions, submit the narrowest sufficient proposal, and wait for the operator decision. A policy denial means the task is blocked, not that the requested approach failed; do not substitute an incomplete result."
+		if t.OpenShell.Provider != "" {
+			prompt += " Use ordinary git and gh; GitHub requests authenticate as " + t.OpenShell.Identity.Login + " and are restricted to " + t.OpenShell.Repository + "."
+		} else {
+			prompt += " This logical identity has no GitHub App. Work locally in the isolated checkout; do not claim a GitHub actor, push, or create a PR."
+		}
 	}
 	if t.Session.Backend == "rex" && t.ParentID != "" {
 		prompt += " This task shares its Rex session with its task family. Name only this task's tab; preserve the shared session label."
@@ -74,7 +79,11 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 		args = append(args, "--", prompt)
 	}
 	if t.RuntimeName() == "openshell" {
-		remote := append([]string{"/usr/local/bin/paddock-agent", fmt.Sprint(t.Session.Generation), t.Session.AgentPath}, args...)
+		launcher := []string{"/usr/local/bin/paddock-agent", fmt.Sprint(t.Session.Generation), t.Session.AgentPath}
+		if t.Provenance.Profile == "investigation" {
+			launcher = []string{"/usr/bin/python3", investigationGuardDir + "/launch.py", fmt.Sprint(t.Session.Generation), investigationGuardDir + "/" + t.Session.Agent}
+		}
+		remote := append(launcher, args...)
 		c := sandboxExec(context.Background(), t, true, remote...)
 		// The content-addressed transport copy has the agent's process name
 		// so Rex can select native agent presentation through the wrapper.
@@ -104,6 +113,14 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	t, err := store.Get(id)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if t.RuntimeName() != "openshell" {
+		fmt.Fprintln(os.Stderr, "host agent execution is unavailable; use OpenShell")
+		return 1
+	}
+	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
+		fmt.Fprintln(os.Stderr, "investigation task has no verified read-only guard")
 		return 1
 	}
 	lease, err := store.taskLease(t.ID, "process")
@@ -222,11 +239,29 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	}
 	stopMCP()
 	if t.RuntimeName() == "openshell" {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		// A disconnected transport does not prove that the remote agent exited.
 		if current, getErr := store.Get(t.ID); getErr == nil {
 			t = current
 		}
+		// Capture the last native turn before the sandbox stops. Integrations can
+		// still reconcile a clean exit after the native workspace is unavailable.
+		if t.Session.ConversationID != "" {
+			turnCtx, turnCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			turn, turnErr := NativeLastTurn(turnCtx, t)
+			turnCancel()
+			if turnErr != nil {
+				turn = AgentTurn{State: "unknown", Error: turnErr.Error()}
+			}
+			generation := t.Session.Generation
+			if snapshotErr := store.UpdateSession(t.ID, func(session *Session) {
+				if session.Generation == generation {
+					session.LastTurn = &turn
+				}
+			}); snapshotErr != nil {
+				fmt.Fprintln(os.Stderr, "could not save native turn state:", snapshotErr)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		release, leaseErr := store.taskLease(t.ID, "operation")
 		if leaseErr != nil {
 			message += "; task operation still active; sandbox retained"

@@ -34,7 +34,8 @@ configure the runtime and start my first task.
 
 ## Install manually
 
-You'll need Git, [mise](https://mise.jdx.dev/), and a running Rex server.
+You'll need Git, [mise](https://mise.jdx.dev/), and either Rex or GNU Screen
+for interactive task sessions. Rex is optional.
 macOS is the tested platform.
 
 ```sh
@@ -55,8 +56,15 @@ New tasks run in OpenShell by default. Follow the [OpenShell setup
 guide](docs/openshell.md) to configure the sandbox, agent authentication, and
 GitHub access before starting a task.
 
-The default OpenShell runtime requires a GitHub App installed on each repository
-you want agents to work in, with these **Repository permissions**:
+Create a named agent identity and register its GitHub App with
+`paddock identity create NAME` and `paddock identity github setup NAME`.
+See [identity onboarding](docs/github.md#create-a-named-paddock-identity-and-register-its-app)
+and the [deterministic CLI interface](docs/integrations.md).
+
+To push branches or create PRs, back the selected identity with a GitHub App
+installed on that repository. A logical identity without an App can run local
+OpenShell tasks with no GitHub credentials. For GitHub work, grant these
+**Repository permissions**:
 
 | Permission | Access | Used for |
 | --- | --- | --- |
@@ -71,13 +79,10 @@ installation. Saving the App settings alone does not update existing
 installations. See [GitHub App setup](docs/github.md#configure-a-github-app) for
 the App ID, private key, installation, and repository routing steps.
 
-You can also use agents already installed and logged in on your Mac:
+Agent execution requires OpenShell. Existing host task records remain inspectable, but cannot resume.
 
-```sh
-paddock runtime default host
-```
-
-Enable **Remote Control** in Rex's settings so Paddock can open task tabs.
+If you use Rex, enable **Remote Control** in its settings so Paddock can open
+task tabs.
 
 ## Teach your agents Paddock
 
@@ -97,26 +102,13 @@ for installation details.
 
 ## Use the CLI
 
-Run `paddock tp` for a persistent Team Principal conversation about all agents
-working on Paddock tasks, across projects. Ask what happened overnight, what needs
-your attention, or have it delegate an investigation through `paddock run`.
+Use `paddock tasks`, `paddock show`, and `paddock artifacts` to inspect agent work.
+The former host Team Principal is unavailable under the OpenShell isolation rule.
 
-```sh
-paddock tp                 # start or return to your Team Principal
-paddock tp --agent claude  # choose Claude Code on the first launch
-```
-
-TP defaults to Codex and runs on the host with your normal agent permissions so
-it can use Paddock's coordination commands. Implementation tasks retain your
-configured runtime. Confirmed project decisions and rationale live as Markdown
-in TP's retained worktree; task and PR status come from Paddock and GitHub.
-See [Team Principal](docs/tp.md) for persistence and launch options.
-
-For an interactive task form, run `paddock new`. Choose a repository, agent, and runtime,
+For an interactive task form, run `paddock new`. Choose a repository and agent,
 write a multiline prompt, and select **Start task**. Registered repository names
 appear in the picker alongside the current project; **Other repository…** accepts
-a path or name. The runtime selector starts with your configured default; choose
-OpenShell or Host for this task without changing the saved default.
+a path or name. Tasks run in OpenShell.
 
 To open that form directly from Rex, install the launcher once:
 
@@ -172,22 +164,17 @@ agent can act on the feedback and reply in the same thread.
 Paddock keeps the terminal session and PR conversation connected. You decide
 when to commit, open a PR, or merge.
 
-## Let Paddock route the work
+## Route work from integrations
 
-Different problems suit different agents. The optional planner can decide
-whether a GitHub comment or CLI request belongs in an existing session or
-needs a new task, and choose Codex or Claude Code for new work. You choose
-which tasks and repositories it can use.
-
-PR comments go straight to the existing agent by default.
-[Enable planning](docs/orchestration.md) when you want Paddock to make those
-routing decisions.
+Use `run`, `message`, and `artifacts --json` with stable external IDs for deterministic
+integration dispatch. GitHub PR comments use direct delivery to the owning task.
+Model-backed orchestration is unavailable until its planner runs in OpenShell.
 
 ## Documentation
 
 - [OpenShell setup](docs/openshell.md)
 - [GitHub setup and PR conversations](docs/github.md)
-- [Planning and routing](docs/orchestration.md)
+- [Integration CLI](docs/integrations.md)
 - [Commands, configuration, and development](docs/reference.md)
 - [Task retention and recovery](docs/lifecycle.md)
 

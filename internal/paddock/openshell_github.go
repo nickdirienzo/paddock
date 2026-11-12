@@ -22,7 +22,7 @@ func (g GitHubCoordinator) discoverSandboxPulls(ctx context.Context) error {
 	}
 	var errs []error
 	for _, t := range tasks {
-		if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready || len(t.OpenShell.Config.WatchAuthors) == 0 || !nativeMessageSupported(t) {
+		if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready || t.OpenShell.Provider == "" || len(t.OpenShell.Config.WatchAuthors) == 0 || !nativeMessageSupported(t) {
 			continue
 		}
 		watched := false

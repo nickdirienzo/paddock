@@ -1,34 +1,20 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/nickdirienzo/paddock/internal/paddock"
 )
 
-const orchestrationHelp = `Ephemeral orchestration:
-  paddock orchestrate --id <stable-id> [--task <id>] [--tasks id,id] [--repos alias,path]
-                      [--model <model>] [--instructions-file <path>] [--dry-run] [--json] "signal text"
-  paddock orchestrate --signal-file <json-file> [scope/model/dry-run options]
+const orchestrationHelp = `Model-backed orchestration is unavailable until its planner runs in OpenShell.
   paddock orchestrate show <source> <id>
   paddock planner configure [--model <model>] [--instructions-file <path>]
   paddock planner show
   paddock planner reset
-
-Signals use {"source":"cli","id":"stable-id","body":"intent","task_id":"optional-origin"}.
-The local CLI accepts source=cli; source adapters authorize external signals separately.
-Origin task is included in scope. --tasks and --repos explicitly expand that scope.
-Dry runs persist a preview without consuming the signal or executing actions.
-Planning uses the existing Codex subscription login, never direct API keys.
 `
 
 func orchestrationService() (paddock.Service, func(), error) {
@@ -119,106 +105,20 @@ func runOrchestrate(args []string, out io.Writer) error {
 		fmt.Fprint(out, orchestrationHelp)
 		return nil
 	}
+	if args[0] != "show" {
+		return fmt.Errorf("model-backed orchestration requires OpenShell and is currently unavailable; use run and message for deterministic dispatch")
+	}
 	s, close, err := orchestrationService()
 	if err != nil {
 		return err
 	}
 	defer close()
-	if args[0] == "show" {
-		if len(args) != 3 {
-			return fmt.Errorf("orchestrate show expects source and ID")
-		}
-		record, err := s.Store.SignalRecord(args[1], args[2])
-		if err != nil {
-			return err
-		}
-		return emit(out, record)
+	if len(args) != 3 {
+		return fmt.Errorf("orchestrate show expects source and ID")
 	}
-	flags, pos, err := parse(args, "id task tasks repos model instructions-file dry-run json signal-file")
+	record, err := s.Store.SignalRecord(args[1], args[2])
 	if err != nil {
 		return err
 	}
-	if flags["help"] != "" {
-		fmt.Fprint(out, orchestrationHelp)
-		return nil
-	}
-	signal := paddock.Signal{Source: "cli", ID: flags["id"], TaskID: flags["task"]}
-	if path := flags["signal-file"]; path != "" {
-		if len(pos) > 0 || flags["id"] != "" || flags["task"] != "" {
-			return fmt.Errorf("signal-file replaces id, task, and body")
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		decoder := json.NewDecoder(io.LimitReader(file, 128000))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(&signal); err != nil {
-			return err
-		}
-		if decoder.Decode(new(any)) != io.EOF {
-			return fmt.Errorf("trailing signal data")
-		}
-	} else {
-		if len(pos) != 1 {
-			return fmt.Errorf("provide one signal body or --signal-file")
-		}
-		signal.Body = pos[0]
-	}
-	if signal.Source != "cli" {
-		return fmt.Errorf("external signals must enter through their authenticated adapter")
-	}
-	if signal.TaskID != "" {
-		t, err := s.Store.Get(signal.TaskID)
-		if err != nil {
-			return err
-		}
-		signal.TaskID = t.ID
-	}
-	ctx, cancel := signalContext()
-	defer cancel()
-	policy, err := s.ResolveOrchestrationPolicy(ctx, signal.TaskID, csv(flags["tasks"]), csv(flags["repos"]))
-	if err != nil {
-		return err
-	}
-	config, err := s.Store.PlannerConfig()
-	if err == nil {
-		config, err = configurePlanner(config, flags)
-	}
-	if err != nil {
-		return err
-	}
-	record, processErr := (paddock.Orchestrator{Service: s, Planner: paddock.CodexPlanner{Model: config.Model, Instructions: config.Instructions}}).Process(ctx, signal, paddock.OrchestrationOptions{DryRun: flags["dry-run"] != "", Policy: policy})
-	if flags["json"] != "" {
-		if err = emit(out, record); err != nil {
-			return err
-		}
-	} else {
-		fmt.Fprintf(out, "Signal: %s/%s\nStatus: %s\nPlanner: %s\n", signal.Source, signal.ID, record.Status, record.Planner)
-		for _, result := range record.Outcomes {
-			fmt.Fprintf(out, "%s [%s]: %s\n", result.Action.Kind, result.Status, result.Action.Reason)
-			if result.Action.TaskID != "" {
-				fmt.Fprintln(out, "  Target:", result.Action.TaskID)
-			}
-			if result.Action.Repo != "" {
-				fmt.Fprintln(out, "  Repository:", result.Action.Repo)
-			}
-			if result.Action.Text != "" {
-				fmt.Fprintln(out, "  Text:", result.Action.Text)
-			}
-			if result.Result != "" {
-				fmt.Fprintln(out, "  Result:", result.Result)
-			}
-			if result.Error != "" {
-				fmt.Fprintln(out, "  Error:", result.Error)
-			}
-		}
-	}
-	return processErr
-}
-func signalContext() (context.Context, context.CancelFunc) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
-	return ctx, func() { cancel(); stop() }
+	return emit(out, record)
 }

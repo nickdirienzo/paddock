@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,23 +17,27 @@ import (
 
 const help = `Paddock — a local control plane for coding agents
 
-  paddock tp [--agent codex|claude] [--terminal auto|rex|screen] [--json] [--detach] [--client Rex-client-id]
-  paddock new [--repo name-or-path] [--agent codex|claude] [--runtime openshell|host]
+  paddock new [--repo name-or-path] [--agent codex|claude]
   paddock rex setup|remove [--config path] [--key shortcut]
   paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
-                           [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
+                           [--identity name] [--profile investigation|implementation]
+                           [--requester id] [--requester-source service] [--external-id id] [--context-file JSON]
+                           [--runtime openshell] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
-  paddock message <id> "message"
+  paddock message <id> "message" [--external-id id] [--json]
   paddock tasks [--json]
   paddock show <id> [--json]
+  paddock artifacts <id> [--json]
   paddock attach [<id>] [--client Rex-client-id]
   paddock shell-setup <id>
   paddock resume <id> [--json] [--detach] [--client Rex-client-id]
+  paddock access pending|show|approve|reject
+  paddock identity create|list|show|disable|enable|verify
   paddock runtime show|configure|check|default
   paddock gc [--apply] [--json]
   paddock lifecycle show|configure
   paddock github --help
-  paddock orchestrate --help
+  paddock orchestrate show <source> <id>
   paddock planner configure|show|reset
   paddock skill setup|status|remove|show
   paddock repo add <name> <path>
@@ -163,8 +168,26 @@ func loadPrompt(command string, pos []string, promptFile string, stdin io.Reader
 func printTask(w io.Writer, t paddock.Task) {
 	fmt.Fprintf(w, "Task: %s\nStatus: %s\nAgent: %s\nRepository: %s\nBase: %s (%s)\nBranch: %s\nWorktree: %s\nTerminal: %s\nSession: %s\n", t.ID, t.Status, t.Session.Agent, t.Repo, t.Base, t.BaseCommit, t.Branch, t.Worktree, t.Session.Backend, t.Session.ID)
 	fmt.Fprintln(w, "Runtime:", t.RuntimeName())
+	if t.Provenance.Caller != "" {
+		fmt.Fprintln(w, "Local caller:", t.Provenance.Caller)
+	}
+	if t.Provenance.Requester != "" {
+		fmt.Fprintf(w, "Asserted requester: %s (%s)\n", t.Provenance.Requester, t.Provenance.RequesterSource)
+	}
+	if t.Provenance.Identity != "" {
+		fmt.Fprintln(w, "Paddock identity:", t.Provenance.Identity)
+	}
+	if t.Provenance.Profile != "" {
+		fmt.Fprintln(w, "Profile:", t.Provenance.Profile)
+	}
+	if len(t.Provenance.Capabilities) > 0 {
+		fmt.Fprintln(w, "Capabilities:", strings.Join(t.Provenance.Capabilities, ", "))
+	}
 	if t.OpenShell != nil {
-		fmt.Fprintf(w, "Sandbox: %s\nGitHub identity: %s (%s)\n", t.OpenShell.Name, t.OpenShell.Identity.Login, t.OpenShell.Repository)
+		fmt.Fprintln(w, "Sandbox:", t.OpenShell.Name)
+		if t.Provenance.GitHubActor != "" {
+			fmt.Fprintf(w, "GitHub actor: %s (%s)\n", t.Provenance.GitHubActor, t.OpenShell.Repository)
+		}
 	}
 	if t.ParentID != "" {
 		fmt.Fprintln(w, "Parent:", t.ParentID)
@@ -200,9 +223,6 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
-	if command == "tp" {
-		return runTP(args[1:], out)
-	}
 	if command == "new" {
 		return runNew(args[1:], out)
 	}
@@ -211,6 +231,12 @@ func run(args []string, out io.Writer) error {
 	}
 	if command == "runtime" {
 		return runRuntime(args[1:], out)
+	}
+	if command == "access" {
+		return runAccess(args[1:], out)
+	}
+	if command == "identity" {
+		return runIdentity(args[1:], out)
 	}
 	if command == "gc" {
 		return runGC(args[1:], out)
@@ -236,7 +262,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime json detach client", "delegate": "prompt-file agent terminal repo base runtime parent json", "resume": "json detach client", "message": "", "tasks": "json", "show": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -329,6 +355,16 @@ func run(args []string, out io.Writer) error {
 		os.Exit(code)
 	}
 	switch command {
+	case "artifacts":
+		t, e := store.Get(pos[0])
+		if e != nil {
+			return e
+		}
+		artifacts, e := service.Artifacts(ctx, t)
+		if e != nil {
+			return e
+		}
+		return emit(out, artifacts)
 	case "resume":
 		t, err := service.Resume(ctx, pos[0])
 		if err != nil {
@@ -336,6 +372,19 @@ func run(args []string, out io.Writer) error {
 		}
 		return presentLaunchedTask(ctx, "run", t, o, out, os.Stderr, service.Attach)
 	case "run", "delegate":
+		contextFields := map[string]string{}
+		if o["context-file"] != "" {
+			data, e := os.ReadFile(o["context-file"])
+			if e != nil {
+				return e
+			}
+			if len(data) > 65536 {
+				return fmt.Errorf("context file exceeds 64 KiB")
+			}
+			if e = json.Unmarshal(data, &contextFields); e != nil {
+				return fmt.Errorf("context file must be a JSON object of strings: %w", e)
+			}
+		}
 		parent := o["parent"]
 		if command == "delegate" && parent == "" {
 			parent = os.Getenv("PADDOCK_TASK_ID")
@@ -343,7 +392,7 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"]})
+		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Profile: o["profile"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
 		if err != nil {
 			return err
 		}
@@ -353,9 +402,57 @@ func run(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
+		var receipt paddock.MessageReceipt
+		if o["external-id"] != "" {
+			caller, e := paddock.LocalCaller()
+			if e != nil {
+				return e
+			}
+			var claimed bool
+			receipt, claimed, e = store.ClaimMessage(t.ID, caller, o["external-id"], pos[1])
+			if e != nil {
+				return e
+			}
+			if !claimed {
+				if o["json"] != "" {
+					return emit(out, receipt)
+				}
+				_, _ = fmt.Fprintln(out, "Message", receipt.ExternalID, "is", receipt.Status)
+				return nil
+			}
+		}
 		thread, e := service.Message(ctx, t, pos[1])
+		if o["external-id"] != "" {
+			status := "delivered"
+			message := ""
+			if e != nil {
+				status = "uncertain"
+				if errors.Is(e, paddock.ErrAgentOffline) {
+					status = "pending"
+				}
+				message = e.Error()
+			}
+			receipt, err = store.FinishMessage(receipt, status, thread, message)
+			if err != nil {
+				return err
+			}
+			if o["json"] != "" {
+				if err = emit(out, receipt); err != nil {
+					return err
+				}
+			}
+		}
 		if e != nil {
 			return e
+		}
+		if o["external-id"] != "" {
+			if o["json"] == "" {
+				_, _ = fmt.Fprintln(out, "Delivered message", receipt.ExternalID, "to", thread)
+			}
+			return nil
+		}
+		if o["json"] != "" {
+			return emit(out, map[string]string{"task_id": t.ID, "thread_id": thread, "status": "queued"})
 		}
 		fmt.Fprintln(out, "Queued message for agent session", thread)
 	case "tasks":
@@ -365,7 +462,9 @@ func run(args []string, out io.Writer) error {
 		}
 		type row struct {
 			paddock.Task
-			Terminal paddock.Observation `json:"terminal"`
+			Terminal      paddock.Observation `json:"terminal"`
+			PendingAccess int                 `json:"pending_access,omitempty"`
+			Blocked       bool                `json:"blocked"`
 		}
 		rows := []row{}
 		for _, t := range tasks {
@@ -373,7 +472,11 @@ func run(args []string, out io.Writer) error {
 			if e != nil {
 				return e
 			}
-			rows = append(rows, row{t, obs})
+			requests, e := store.ListAccess(t.ID, "pending")
+			if e != nil {
+				return e
+			}
+			rows = append(rows, row{Task: t, Terminal: obs, PendingAccess: len(requests), Blocked: len(requests) > 0})
 		}
 		if o["json"] != "" {
 			return emit(out, rows)
@@ -381,7 +484,11 @@ func run(args []string, out io.Writer) error {
 		w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tSTATUS\tAGENT\tTERMINAL\tPARENT\tPROMPT")
 		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s:%s\t%s\t%s\n", short(r.ID), r.Status, r.Session.Agent, r.Session.Backend, r.Terminal.State, short(r.ParentID), oneLine(r.Prompt))
+			status := r.Status
+			if r.PendingAccess > 0 {
+				status = fmt.Sprintf("%s (access:%d)", status, r.PendingAccess)
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s:%s\t%s\t%s\n", short(r.ID), status, r.Session.Agent, r.Session.Backend, r.Terminal.State, short(r.ParentID), oneLine(r.Prompt))
 		}
 		return w.Flush()
 	case "show":
@@ -403,17 +510,41 @@ func run(args []string, out io.Writer) error {
 				return err
 			}
 		}
+		accessRequests, err := store.ListAccess(t.ID, "pending")
+		if err != nil {
+			return err
+		}
+		lastTurn := t.Session.LastTurn
+		if t.RuntimeName() == "openshell" && t.OpenShell != nil && t.OpenShell.Ready && obs.State == "running" {
+			turn, turnErr := paddock.NativeLastTurn(ctx, t)
+			if turnErr != nil {
+				turn.Error = turnErr.Error()
+			}
+			if t.Session.Agent == "codex" || t.Session.Agent == "claude" {
+				lastTurn = &turn
+			}
+		}
 		if o["json"] != "" {
-			return emit(out, paddock.Detail{Task: t, Terminal: obs, Children: children})
+			return emit(out, paddock.Detail{Task: t, Terminal: obs, LastTurn: lastTurn, Children: children, AccessRequests: accessRequests, Blocked: len(accessRequests) > 0})
 		}
 		printTask(out, t)
 		fmt.Fprintln(out, "Terminal state:", obs.State)
+		if lastTurn != nil {
+			fmt.Fprintln(out, "Last model turn:", lastTurn.State)
+			if lastTurn.Error != "" {
+				fmt.Fprintln(out, "Turn inspection error:", lastTurn.Error)
+			}
+		}
 		if obs.Error != "" {
 			fmt.Fprintln(out, "Inspection error:", obs.Error)
 		}
 		fmt.Fprintln(out, "Children:")
 		for _, c := range children {
 			fmt.Fprintf(out, "  %s  %s  %s  %s\n", c.ID, c.Status, c.Session.Agent, oneLine(c.Prompt))
+		}
+		fmt.Fprintln(out, "Pending access requests:")
+		for _, request := range accessRequests {
+			fmt.Fprintf(out, "  %s  %s  %s\n", request.ID, request.Endpoints, request.Binary)
 		}
 	case "attach":
 		t, err := store.Get(pos[0])

@@ -469,7 +469,7 @@ func (o Orchestrator) act(ctx context.Context, signal Signal, out ActionOutcome)
 			}
 			text = fmt.Sprintf("GitHub comment from %s on %s\nReview context: %s:%d\nOrigin task: %s\n\n%s\n\n%s", e.Comment.User.Login, e.Comment.HTMLURL, e.Comment.Path, e.Comment.Line, signal.TaskID, text, reply)
 		}
-		return o.Service.Message(ctx, task, text)
+		return o.Service.sendMessage(ctx, task, text)
 	case "delegate", "create_task":
 		parent := ""
 		repo := a.Repo

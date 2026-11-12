@@ -124,15 +124,44 @@ func readProtectedKey(path string) ([]byte, error) {
 // Import a downloaded key into a separate owner-only credential directory.
 // The original file remains untouched. Never place this directory in task state.
 func ImportGitHubAppKey(appID int64, source string) (string, error) {
-	if appID < 1 {
-		return "", fmt.Errorf("invalid App ID")
+	data, err := readProtectedKey(source)
+	if err != nil {
+		return "", err
+	}
+	defer clear(data)
+	return ImportGitHubAppKeyBytes(appID, data)
+}
+
+func ImportGitHubAppKeyForIdentity(appID int64, name, source string) (string, error) {
+	if !identityName.MatchString(name) {
+		return "", fmt.Errorf("invalid identity name")
 	}
 	data, err := readProtectedKey(source)
 	if err != nil {
 		return "", err
 	}
 	defer clear(data)
-	if _, err = parseAppKey(data); err != nil {
+	return ImportGitHubAppKeyBytesForIdentity(appID, name, data)
+}
+
+func ImportGitHubAppKeyBytesForIdentity(appID int64, name string, data []byte) (string, error) {
+	if !identityName.MatchString(name) {
+		return "", fmt.Errorf("invalid identity name")
+	}
+	return importGitHubAppKeyBytes(appID, name, data)
+}
+
+// ImportGitHubAppKeyBytes accepts the one-time manifest conversion response
+// without writing its PEM into a worktree or temporary source file.
+func ImportGitHubAppKeyBytes(appID int64, data []byte) (string, error) {
+	return importGitHubAppKeyBytes(appID, "", data)
+}
+
+func importGitHubAppKeyBytes(appID int64, name string, data []byte) (string, error) {
+	if appID < 1 {
+		return "", fmt.Errorf("invalid App ID")
+	}
+	if _, err := parseAppKey(data); err != nil {
 		return "", err
 	}
 	home, err := os.UserConfigDir()
@@ -162,7 +191,11 @@ func ImportGitHubAppKey(appID int64, source string) (string, error) {
 	if err = f.Close(); err != nil {
 		return "", err
 	}
-	dest := filepath.Join(dir, "github-app-"+strconv.FormatInt(appID, 10)+".pem")
+	filename := "github-app-" + strconv.FormatInt(appID, 10)
+	if name != "" {
+		filename += "-" + name
+	}
+	dest := filepath.Join(dir, filename+".pem")
 	if err = replaceFile(f.Name(), dest); err != nil {
 		return "", fmt.Errorf("cannot install private key")
 	}
@@ -170,6 +203,29 @@ func ImportGitHubAppKey(appID int64, source string) (string, error) {
 		return "", err
 	}
 	return dest, nil
+}
+
+// RemoveGitHubAppKeyForIdentity deletes only the credential path Paddock
+// generated for this named identity. Legacy shared App-ID files are untouched.
+func RemoveGitHubAppKeyForIdentity(appID int64, name, configured string) error {
+	if appID < 1 || !identityName.MatchString(name) {
+		return fmt.Errorf("invalid identity key reference")
+	}
+	home, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	expected := filepath.Join(home, "paddock", "credentials", "github-app-"+strconv.FormatInt(appID, 10)+"-"+name+".pem")
+	if configured != expected {
+		return nil
+	}
+	if err := os.Remove(expected); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("cannot remove identity key: %w", err)
+	}
+	return syncDirectory(filepath.Dir(expected))
 }
 func (a *githubAppAuth) jwt() (string, error) {
 	key, err := a.key()
@@ -318,7 +374,7 @@ func DiscoverGitHubAppInstallations(ctx context.Context, config GitHubAppConfig)
 	if err != nil {
 		return nil, err
 	}
-	var all []GitHubAppInstallation
+	all := []GitHubAppInstallation{}
 	for page := 1; page <= 100; page++ {
 		var entries []GitHubAppInstallation
 		if _, err = a.http(ctx, "GET", fmt.Sprintf("app/installations?per_page=100&page=%d", page), jwt, nil, &entries); err != nil {

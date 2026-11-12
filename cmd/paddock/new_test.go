@@ -57,15 +57,13 @@ func TestNewRepositoryChoices(t *testing.T) {
 }
 
 func TestNewTaskPreservesLiteralPromptAndSelectedRuntime(t *testing.T) {
-	draft := newTaskDraft{Repo: "/repo with spaces", Agent: "claude", Runtime: "host", Prompt: "--literal $(touch /tmp/nope)\n\nsecond line; `quoted`"}
+	draft := newTaskDraft{Repo: "/repo with spaces", Agent: "claude", Runtime: "openshell", Prompt: "--literal $(touch /tmp/nope)\n\nsecond line; `quoted`"}
 	args := newTaskRunArgs(draft, map[string]string{"terminal": "rex", "base": "main"})
 	flags, pos, err := parse(args[1:], "json repo agent runtime terminal base")
-	if err != nil || flags["repo"] != draft.Repo || flags["agent"] != "claude" || flags["terminal"] != "rex" || flags["base"] != "main" || flags["runtime"] != "host" || len(pos) != 1 || pos[0] != draft.Prompt {
+	if err != nil || flags["repo"] != draft.Repo || flags["agent"] != "claude" || flags["terminal"] != "rex" || flags["base"] != "main" || flags["runtime"] != "openshell" || len(pos) != 1 || pos[0] != draft.Prompt {
 		t.Fatal(flags, pos, err)
 	}
-	// A choice made in the form supersedes the flag that initially selected it.
-	draft.Runtime = "openshell"
-	flags, _, err = parse(newTaskRunArgs(draft, map[string]string{"runtime": "host"})[1:], "json repo agent runtime")
+	flags, _, err = parse(newTaskRunArgs(draft, nil)[1:], "json repo agent runtime")
 	if err != nil || flags["runtime"] != "openshell" {
 		t.Fatal(flags, err)
 	}
@@ -92,8 +90,11 @@ func TestNewTaskRuntimeStartsAtConfiguredDefault(t *testing.T) {
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := newTaskRuntime(home, ""); err != nil || got != "host" {
-		t.Fatal(got, err)
+	if _, err := newTaskRuntime(home, ""); err == nil {
+		t.Fatal("accepted legacy host default")
+	}
+	if _, err := newTaskRuntime(home, "host"); err == nil {
+		t.Fatal("accepted host runtime")
 	}
 	if got, err := newTaskRuntime(home, "openshell"); err != nil || got != "openshell" {
 		t.Fatal(got, err)
@@ -103,32 +104,30 @@ func TestNewTaskRuntimeStartsAtConfiguredDefault(t *testing.T) {
 	}
 }
 
-func TestNewFormShowsAndSelectsAgentsAndRuntimes(t *testing.T) {
+func TestNewFormShowsAndSelectsAgents(t *testing.T) {
 	draft := newTaskDraft{Repo: "/project", Agent: "codex", Runtime: "openshell", Start: true}
 	form := newTaskForm(&draft, []repositoryChoice{{"Project", "/project"}}, t.TempDir(), "")
 	form.Init()
 	form.NextGroup()
 	form.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	view := form.View()
-	for _, label := range []string{"Codex", "Claude Code", "OpenShell (sandbox)", "Host (local machine)"} {
+	for _, label := range []string{"Codex", "Claude Code"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("option %q is hidden: %s", label, view)
 		}
 	}
 	form.Update(tea.KeyMsg{Type: tea.KeyDown})
-	form.NextField()
-	form.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if draft.Agent != "claude" || draft.Runtime != "host" {
+	if draft.Agent != "claude" || draft.Runtime != "openshell" {
 		t.Fatalf("selection did not reach the draft: %+v", draft)
 	}
 	flags, _, err := parse(newTaskRunArgs(draft, nil)[1:], "json repo agent runtime")
-	if err != nil || flags["agent"] != "claude" || flags["runtime"] != "host" {
+	if err != nil || flags["agent"] != "claude" || flags["runtime"] != "openshell" {
 		t.Fatal("selected settings were not sent to run", flags, err)
 	}
 }
 
 func TestEscapeCancelsEveryLauncherPage(t *testing.T) {
-	for _, page := range []string{"repository", "custom path", "agent", "runtime", "prompt", "submit", "error notice"} {
+	for _, page := range []string{"repository", "custom path", "agent", "prompt", "submit", "error notice"} {
 		t.Run(page, func(t *testing.T) {
 			draft := newTaskDraft{Repo: "/project", Agent: "codex", Runtime: "openshell", Start: true}
 			if page == "custom path" {
@@ -138,9 +137,6 @@ func TestEscapeCancelsEveryLauncherPage(t *testing.T) {
 			form.Init()
 			if page != "repository" {
 				form.NextGroup()
-			}
-			if page == "runtime" {
-				form.NextField()
 			}
 			if page == "prompt" || page == "submit" {
 				form.NextGroup()

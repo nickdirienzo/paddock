@@ -19,13 +19,12 @@ import (
 )
 
 const newHelp = `Usage: paddock new [--repo name-or-path] [--agent codex|claude]
-                   [--runtime openshell|host] [--base ref] [--terminal auto|rex|screen]
+                   [--runtime openshell] [--base ref] [--terminal auto|rex|screen]
                    [--client Rex-client-id]
 
-Choose a repository, agent, and runtime, then write a multiline task description.
+Choose a repository and agent, then write a multiline task description.
 Use Tab / Shift-Tab to move between fields, Enter for a new line in the
-description, and Escape or Ctrl-C to cancel. Runtime starts at your configured
-default; changing it in the form applies only to the new task.
+description, and Escape or Ctrl-C to cancel. Agent execution uses OpenShell.
 Install a floating Rex launcher with: paddock rex setup
 `
 
@@ -106,6 +105,9 @@ func validateNewPrompt(prompt string) error {
 
 func newTaskRuntime(home, requested string) (string, error) {
 	if requested != "" {
+		if requested != "openshell" {
+			return "", fmt.Errorf("agent execution requires OpenShell; host runtime is unavailable")
+		}
 		return requested, nil
 	}
 	// Read the preference without creating registry files just to show a form.
@@ -153,10 +155,7 @@ func newTaskForm(draft *newTaskDraft, choices []repositoryChoice, home, base str
 			huh.NewSelect[string]().Title("Agent").Options(
 				huh.NewOption("Codex", "codex"), huh.NewOption("Claude Code", "claude"),
 			).Value(&draft.Agent),
-			huh.NewSelect[string]().Title("Runtime").Options(
-				huh.NewOption("OpenShell (sandbox)", "openshell"), huh.NewOption("Host (local machine)", "host"),
-			).Value(&draft.Runtime),
-		).Title("Agent and runtime").Description("Use ↑/↓ to choose and Tab to move between fields. Escape cancels."),
+		).Title("Agent").Description("Use ↑/↓ to choose and Tab to move between fields. Escape cancels."),
 		huh.NewGroup(
 			huh.NewText().Title("What should the agent do?").Placeholder("Describe the task…").
 				Lines(8).CharLimit(maxPromptBytes).ExternalEditor(false).ShowLineNumbers(false).
@@ -190,7 +189,7 @@ func runNew(args []string, out io.Writer) error {
 	if len(pos) != 0 {
 		return fmt.Errorf("new takes no positional arguments; use paddock new --help")
 	}
-	for name, allowed := range map[string]string{"agent": "codex claude", "runtime": "openshell host", "terminal": "auto rex screen"} {
+	for name, allowed := range map[string]string{"agent": "codex claude", "runtime": "openshell", "terminal": "auto rex screen"} {
 		if value := flags[name]; value != "" && !strings.Contains(" "+allowed+" ", " "+value+" ") {
 			return fmt.Errorf("invalid --%s %q (use %s)", name, value, allowed)
 		}

@@ -232,36 +232,16 @@ func TestGitHubPlannerAuthorizationCrossTaskAndReply(t *testing.T) {
 		t.Fatal("revoked author still grants reply authority")
 	}
 }
-func TestCodexPlannerUsesSubscriptionAndNoExecutionTools(t *testing.T) {
-	dir := t.TempDir()
-	args := filepath.Join(dir, "args")
-	env := filepath.Join(dir, "env")
-	fake := script(t, `printf '%s\n' "$@" > `+quote(args)+`
-env > `+quote(env)+`
-while test "$#" -gt 0; do
- if test "$1" = '--output-last-message'; then shift; result="$1"; fi
- shift
-done
-cat >/dev/null
-printf '%s' '{"requests":[],"actions":[{"kind":"ignore","task_id":"","repo":"","base":"","agent":"","text":"","reason":"irrelevant"}]}' > "$result"
-`)
+func TestCodexPlannerCannotExecuteOnHost(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "executed")
+	fake := script(t, "touch "+quote(marker))
 	t.Setenv("PADDOCK_CODEX_BIN", fake)
-	t.Setenv("OPENAI_API_KEY", "must-not-leak")
-	t.Setenv("GH_TOKEN", "must-not-leak")
-	t.Setenv("PADDOCK_GITHUB_PRIVATE_KEY", "must-not-leak")
-	_, err := (CodexPlanner{Model: "chosen-model", Instructions: "prefer reuse"}).Decide(context.Background(), PlanningInput{})
-	if err != nil {
+	_, err := (CodexPlanner{}).Decide(context.Background(), PlanningInput{})
+	if err == nil || !strings.Contains(err.Error(), "OpenShell") {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(args)
-	for _, flag := range []string{"--ephemeral", "--ignore-user-config", "read-only", "forced_login_method=\"chatgpt\"", "shell_tool", "hooks", "plugins", "apps", "chosen-model", "--output-schema"} {
-		if !strings.Contains(string(data), flag) {
-			t.Fatal("missing planner protection", flag)
-		}
-	}
-	data, _ = os.ReadFile(env)
-	if strings.Contains(string(data), "must-not-leak") {
-		t.Fatal("credentials leaked into planner")
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("host planner executed", err)
 	}
 }
 func TestPlannerConfigurationRoundTrip(t *testing.T) {

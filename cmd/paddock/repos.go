@@ -78,7 +78,7 @@ func runRepo(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Codex project trust for future tasks: %t (%s)\n", trusted, path)
+		fmt.Fprintf(out, "Project trust for future tasks: %t (%s)\n", trusted, path)
 		return nil
 	}
 	if pos[0] == "add" {

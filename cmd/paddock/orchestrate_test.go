@@ -48,7 +48,7 @@ func TestOrchestrateRejectsExternalSignalImpersonation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := run([]string{"orchestrate", "--signal-file", path}, &out); err == nil || !strings.Contains(err.Error(), "authenticated adapter") {
+	if err := run([]string{"orchestrate", "--signal-file", path}, &out); err == nil || !strings.Contains(err.Error(), "OpenShell") {
 		t.Fatal(err)
 	}
 }

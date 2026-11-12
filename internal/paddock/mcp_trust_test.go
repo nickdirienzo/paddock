@@ -36,6 +36,17 @@ enabled = false
 	return s, repo, home
 }
 
+func TestTrustedHostMCPBridgeCannotForwardAgentTools(t *testing.T) {
+	s, _, _ := mcpTrustFixture(t)
+	common, err := s.SetRepoMCPTrust(context.Background(), "project", []string{"observe"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startTrustedMCPBridge(s, Task{CommonDir: common}); err == nil || !strings.Contains(err.Error(), "OpenShell") {
+		t.Fatal("host MCP bridge was accepted", err)
+	}
+}
+
 func TestMCPTrustScopedPinnedAndRevocable(t *testing.T) {
 	s, repo, host := mcpTrustFixture(t)
 	ctx := context.Background()

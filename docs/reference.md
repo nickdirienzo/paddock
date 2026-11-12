@@ -3,9 +3,18 @@
 Commands, configuration, and operating details. For an introduction and the
 basic workflow, start with the [README](../README.md).
 
+For named agent identities, GitHub App registration, and deterministic service
+dispatch, see [GitHub identity onboarding](github.md#create-a-named-paddock-identity-and-register-its-app)
+and [the integration interface](integrations.md).
+
 ## Setup
 
-Requirements: Git, a configured OpenShell gateway/agent image/model provider and mapped GitHub App, and either a running local Rex server or GNU Screen. Host mode instead uses a logged-in local `codex` or `claude`. macOS is the tested development platform; the terminal adapters also target Unix environments. Native Windows terminal execution is not implemented (use WSL). Building a Windows binary alone does not provide Windows terminal support.
+Requirements: Git, a configured OpenShell gateway, agent image, model provider,
+a named identity, and either a running local Rex server or GNU Screen. A GitHub
+App is required for GitHub work; local-only identities need no App. macOS is
+the tested development platform; the terminal adapters also target Unix
+environments. Native Windows terminal execution is not implemented (use WSL).
+Building a Windows binary alone does not provide Windows terminal support.
 
 Development tooling is pinned with [mise](https://mise.jdx.dev/):
 
@@ -18,7 +27,9 @@ install -m 755 bin/paddock ~/.local/bin/paddock
 ~/.local/bin/paddock skill setup
 ```
 
-Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting executable has no language runtime or database dependency. Keep the executable at a stable path while tasks are running: their delegation instructions refer to it.
+Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting
+executable has no language runtime or database dependency. Keep the executable
+at a stable path while tasks are running because host task supervisors use it.
 
 ```sh
 cd /path/to/any/git/repository
@@ -41,7 +52,14 @@ paddock run --repo project --prompt-file goal.md
 pbpaste | paddock run --repo project -
 ```
 
-The directory must have an existing Git commit. No repository registration is needed. Default agent: `codex`. Default terminal: use a reachable local Rex server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to choose explicitly. An explicit backend failure never silently launches another session elsewhere. Ordinary `paddock run` also selects the new session in the connected Rex app when Remote Control is enabled. Use `--detach` to leave it in the background. JSON output, delegation, and runs invoked from an existing Paddock agent stay in the background; Screen continues to launch detached.
+The directory must have an existing Git commit. No repository registration is
+needed. Default agent: `codex`. Default terminal: use a reachable local Rex
+server, otherwise GNU Screen. Use `--terminal rex` or `--terminal screen` to
+choose explicitly. An explicit backend failure never silently launches another
+session elsewhere. Ordinary `paddock run` also selects the new session in the
+connected Rex app when Remote Control is enabled. Use `--detach` to leave it in
+the background. JSON output and delegation stay in the background; Screen
+continues to launch detached.
 
 Bare repositories are supported too. Point at the bare repository itself; Paddock creates a separate task worktree from it:
 
@@ -53,7 +71,7 @@ A plain directory named `project` next to `project.git` is not automatically a c
 
 ### Interactive task launcher
 
-`paddock new` opens a terminal form with a repository picker, agent and runtime selectors,
+`paddock new` opens a terminal form with a repository picker, agent selector,
 multiline prompt, and Start task button. Registered repositories are listed by
 name; the current project is preselected when available. **Other repository…**
 accepts a registered name or a path, including `~/` and bare repositories.
@@ -73,22 +91,19 @@ Control setting to allow session selection.
 
 Use arrows to choose a repository or agent, Tab / Shift-Tab to move between
 fields, Enter for a newline in the prompt, and Escape or Ctrl-C to cancel. Both
-Codex and Claude Code are shown in the agent list; the runtime list shows
-OpenShell (sandbox) and Host (local machine). Selecting **Cancel** or pressing
+Codex and Claude Code are shown in the agent list; all agent tasks use OpenShell. Selecting **Cancel** or pressing
 Escape or Ctrl-C creates no task. Launch errors remain visible until
 dismissed. If session selection fails after creation, the launcher shows the
 existing task's attach command; it does not launch again.
 
 `new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
-`--client`. The runtime selector starts at the configured default, or at
-`--runtime` when supplied. Changing it applies only to the new task and leaves
-the saved default unchanged. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
+`--client`. `--runtime` accepts only `openshell`. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
 terminal selection as `run`. Use `run` for scripts and pipelines.
 
 Setup records the executable's absolute path. Install Paddock at its stable
 location before running setup, and rerun setup if that location changes. It
 also records the setup shell's PATH and explicit Paddock tool overrides so
-mise-managed agents and the host MCP bridge work when Rex starts from the GUI.
+Rex can find the Paddock executable when started from the GUI.
 Run setup from a shell where your agents are available, and rerun it after
 changing their installation paths. Other shell environment variables and
 credentials are not copied into the launcher configuration. Setup updates only
@@ -141,7 +156,7 @@ the approved author list, and asks agents to report watch and poller readiness w
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions, resumes stopped Codex and Claude conversations in either runtime when their
+routes comments to online sessions, resumes stopped OpenShell Codex and Claude conversations when their
 identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 
@@ -171,21 +186,15 @@ paddock repo trust project
 paddock repo untrust project
 ```
 
-Both commands accept an alias or a repository path. Trust is opt-in and belongs to the canonical Git common directory, so linked worktrees and delegated Codex children share the decision. Removing an alias does not revoke trust; use `untrust` first, or pass the repository path afterward.
+Both commands accept an alias or a repository path. Trust is opt-in and belongs to the canonical Git common directory, so linked worktrees and delegated children share the decision. Removing an alias does not revoke trust; use `untrust` first, or pass the repository path afterward.
 
-For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. This avoids the repeated folder trust prompt and allows Codex to load that project's configuration. It does not edit your global Codex config or add approval/sandbox bypass flags. Claude's folder trust remains managed by Claude. Rex Remote Control is a separate app setting.
+For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. For new OpenShell Claude tasks, Paddock records the same opt-in trust decision in that task's isolated Claude config before launch. Claude 2.1.286 keeps this decision in its private `projects.<path>.hasTrustDialogAccepted` state; Paddock changes only that field and leaves native tool approvals enabled. It does not edit your host Claude or Codex config or add permission bypass flags. Rex Remote Control is a separate app setting.
 
-Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in Codex.
+Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in either agent.
 
-To grant OpenShell tasks access to selected host MCP connections, use
-`paddock repo trust project --mcp observe,metabase`. This grants project trust
-and access to those named HTTPS MCP servers using host Codex's existing login
-and network. MCP grants are additive; ordinary project trust grants none.
-Use `paddock repo untrust project --mcp metabase` to revoke one server, or
-`paddock repo untrust project` to revoke all grants along with project trust.
-Revocation blocks new requests immediately. Exit and resume the agent to load
-new grants. See [trusted MCP connections](openshell.md#trusted-mcp-connections)
-for authentication, scope, and configuration-change behavior.
+Trusted host MCP connections are unavailable for agent tasks because tool calls
+must execute inside OpenShell. Remove existing grants with `paddock repo untrust
+project --mcp NAME` before resuming an affected task.
 
 ### Remembering Codex hook decisions
 
@@ -227,18 +236,24 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 
 | Command | Behavior |
 | --- | --- |
-| `paddock tp` | Open or resume the registry's persistent Team Principal conversation; see [Team Principal](tp.md). |
 | `paddock new` | Open an interactive task form and display the created Rex session. |
 | `paddock rex setup\|remove` | Install or remove the floating task launcher and shortcut in Rex's configuration. |
-| `paddock run <prompt\|->` | Persist a task, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
+| `paddock run <prompt\|->` | Persist a task with an authorized identity and profile, create its worktree, launch the agent in OpenShell, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
-| `paddock show <id>` | Show the prompt, parent, children, repository, base commit, branch, worktree, terminal, and exit status. |
+| `paddock show <id>` | Show provenance, prompt, task and native turn state, pending access requests, terminal, and exit status. |
+| `paddock artifacts <id>` | Report commits, workspace changes, and PRs for a task. |
+| `paddock message <id> <text>` | Send a native follow-up with an optional idempotency key. |
+| `paddock identity create\|show\|verify` | Create, inspect, and verify a named agent identity. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
 Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `--json` for scripting. Prompts are passed as argument values, read from stdin with `-`, or loaded with `--prompt-file <path>`; they are never evaluated as shell code. Use `--` before a prompt that begins with a dash.
 
-`run` and `delegate` accept `--agent codex|claude`, `--terminal auto|rex|screen`, `--repo <directory>`, and `--base <ref>`. Options may precede or follow the prompt.
+`run` and `delegate` accept `--agent codex|claude`,
+`--terminal auto|rex|screen`, `--repo <directory>`, `--base <ref>`,
+`--identity <name>`, and `--profile investigation|implementation`. For
+integration calls, also use `--requester`, `--requester-source`, `--external-id`,
+and `--context-file`. Options may precede or follow the prompt.
 
 ### Delegation
 
@@ -253,12 +268,12 @@ Independent context alone does not require that lifecycle.
 ```sh
 # From your own shell:
 paddock delegate --parent <id> --agent claude "Implement the frontend"
-
-# Inside an agent launched by Paddock:
-paddock delegate --agent claude "Implement the frontend"
 ```
 
-The supervisor exports `PADDOCK_TASK_ID`, `PADDOCK_PARENT_TASK_ID`, and `PADDOCK_HOME`, and adds Paddock's executable directory to PATH. The agent prompt includes an absolute delegation command with an explicit parent ID and registry path, so delegation can also work when an agent filters environment variables. The agent's ordinary tool approvals still apply.
+The host owns delegation. An OpenShell agent receives its task ID but cannot
+invoke the host Paddock CLI. Ask the host operator to create a durable child
+when one is authorized; use native subagents for short reviews inside the
+current task.
 
 Use `paddock message TASK_ID "instruction or result"` to communicate with an existing
 Paddock agent. Terminal typing can interfere with the user's input and is not a
@@ -394,7 +409,7 @@ for artifact policy, recovery, and the current automatic-shutdown limitation.
 
 Repository identity uses Git's common directory, including when launched from a linked worktree, bare repository, or subdirectory. Base selection uses locally available refs in this order: `origin/HEAD`, `origin/main`, `origin/master`, configured `init.defaultBranch`, `main`, `master`. For other layouts, specify `--base`. Paddock does not fetch automatically: run `git fetch` yourself when you want fresher remote refs. The resolved commit is recorded before worktree creation.
 
-Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. OpenShell tasks use a private Git database inside their retained sandbox. Explicit host tasks share the original Git database and provide working-directory isolation only. Post-checkout hooks are disabled for worktree creation.
+Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. OpenShell tasks use a private Git database inside their retained sandbox. Post-checkout hooks are disabled for worktree creation.
 
 Worktrees stay warm until explicit `paddock gc --apply` passes the retention and safety checks. Task JSON records refer to native conversation history; the JSON alone is not a conversation or filesystem backup.
 
@@ -411,14 +426,14 @@ OpenShell owns sandbox isolation and credential substitution. Paddock owns task 
 ```sh
 mise run build
 mise run check
-# Real terminal integration; requires access to the terminal server:
-PADDOCK_LIVE_TERMINAL=screen mise exec -- go test ./internal/paddock -run TestLiveTerminalLifecycle -v -count=1
-PADDOCK_LIVE_TERMINAL=rex mise exec -- go test ./internal/paddock -run TestLiveTerminalLifecycle -v -count=1
-# Native Codex hook trust checks; isolated config, no model calls or hook execution:
-PADDOCK_LIVE_CODEX=1 mise exec -- go test ./internal/paddock -run TestLiveCodexHookTrust -v -count=1
 ```
 
-Tests cover restart persistence, parent-child lookup, concurrent writers in separate processes, atomic readers, lock recovery after process death, corrupt records, repository/default-ref resolution, unchanged source checkouts, linked worktrees, repository trust and revocation, supervisor exits, literal prompt handling, terminal observation failures, and Rex metadata recovery. Live tests run real Paddock subprocesses in real terminals with deterministic fixture agents; the parent invokes the CLI to delegate its child. Rex tests also verify the agent owns the foreground process group. These tests do not consume model subscriptions.
+Tests cover restart persistence, parent-child lookup, concurrent writers,
+atomic state, repository resolution, identity ownership and routing, immutable
+provenance, credential boundaries, terminal observation, lifecycle recovery,
+and profile authorization. Legacy host-agent terminal tests are skipped while
+host LLM execution is unavailable. Live OpenShell and GitHub App checks are
+recorded in the [identity acceptance notes](identity-acceptance.md).
 
 For development and wrappers, `PADDOCK_CODEX_BIN`, `PADDOCK_CLAUDE_BIN`, `PADDOCK_REX_BIN`, and `PADDOCK_SCREEN_BIN` override executable locations. Values are executable paths, not shell command strings.
 
@@ -434,19 +449,9 @@ Native macOS operation is tested. Linux and Windows compilation is checked separ
 
 Copyright 2026 Paddock contributors. Licensed under the [Apache License, Version 2.0](../LICENSE).
 
-### Intelligent orchestration
+### Integration dispatch
 
-`paddock orchestrate` runs an ephemeral, subscription-backed Codex planner against
-scoped tasks, sessions, repositories, and PR discussion. It can ignore, message an
-existing agent, delegate a child, create independent work in another repository, or
-reply. Decisions and outcomes are durable; repeated signals do not duplicate work.
-
-```sh
-paddock planner configure --model MODEL --instructions-file ./pit-wall.txt
-paddock orchestrate --id request-104 --task TASK_ID --dry-run "Investigate this request"
-```
-
-GitHub watches keep direct messaging by default. Enable planning explicitly with
-`paddock github routing PR_URL --mode planner`, adding `--tasks` and `--repos` for
-cross-task or cross-repository scope. See [orchestration](orchestration.md) for
-configuration, previews, context reads, authorization, and the real-model acceptance run.
+Use `paddock run --external-id`, `paddock message --external-id`, and
+`paddock artifacts --json` for deterministic integration dispatch. See
+[integration CLI](integrations.md). Model-backed orchestration is unavailable
+until its planner runs in OpenShell.

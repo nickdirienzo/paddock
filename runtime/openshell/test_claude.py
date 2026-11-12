@@ -17,12 +17,14 @@ class InboxTest(unittest.TestCase):
         for admission in ('queued', 'held', 'refused'):
             with self.subTest(admission=admission), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
+                home = root / 'home'
+                home.mkdir()
                 (root / 'claude-process.json').write_text(json.dumps({'pid': os.getpid(), 'conversation': 'saved', 'generation': 2}))
-                (root / 'projects' / 'test').mkdir(parents=True)
-                log = root / 'projects' / 'test' / 'saved.jsonl'
+                (home / 'projects' / 'test').mkdir(parents=True)
+                log = home / 'projects' / 'test' / 'saved.jsonl'
                 log.write_text('old enqueue evidence must not count\n')
                 with socket.socket(socket.AF_UNIX) as server:
-                    server.bind(str(root / 'claude.sock'))
+                    server.bind(str(home / 'paddock-inbox.sock'))
                     server.listen()
                     frames = []
                     def receive():
@@ -37,7 +39,7 @@ class InboxTest(unittest.TestCase):
                                     output.write('[cross-session-inbound] ' + admission + ': ' + prefix + '\n')
                     worker = threading.Thread(target=receive)
                     worker.start()
-                    result = message.deliver(root, 'saved', 2, 'fix the PR', timeout=0.2, home=root)
+                    result = message.deliver(root, 'saved', 2, 'fix the PR', timeout=0.2, home=home)
                     worker.join(1)
                     self.assertEqual(result, 'queued' if admission == 'queued' else 'uncertain')
                     self.assertEqual(frames[0]['priority'], 'next')

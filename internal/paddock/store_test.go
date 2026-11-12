@@ -25,6 +25,27 @@ func openTestStore(t *testing.T, home string) *Store {
 	t.Cleanup(func() { s.Close() })
 	return s
 }
+func TestNativeTurnSnapshotSurvivesSessionExitAndRegistryReopen(t *testing.T) {
+	home := t.TempDir()
+	store := openTestStore(t, home)
+	task := taskFixture()
+	task.Session.Generation = 2
+	if err := store.Insert(task); err != nil {
+		t.Fatal(err)
+	}
+	turn := AgentTurn{ID: "turn-1", State: "completed"}
+	if err := store.UpdateSession(task.ID, func(session *Session) { session.LastTurn = &turn }); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Finish(task.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestStore(t, home)
+	got, err := reopened.Get(task.ID)
+	if err != nil || got.Status != "stopped" || got.Session.Generation != 2 || got.Session.LastTurn == nil || *got.Session.LastTurn != turn {
+		t.Fatalf("native turn snapshot lost after exit: %+v, %v", got, err)
+	}
+}
 func TestStorePersistenceAndRelationships(t *testing.T) {
 	home := t.TempDir()
 	s := openTestStore(t, home)

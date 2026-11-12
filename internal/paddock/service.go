@@ -3,6 +3,7 @@ package paddock
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,25 @@ import (
 type Service struct {
 	Store      *Store
 	Executable string
+	// Tests can supply deterministic native-delivery behavior for routing fixtures.
+	// Production services leave this nil and use the OpenShell-only Message path.
+	messageDelivery func(context.Context, Task, string) (string, error)
 }
-type RunOptions struct{ Prompt, Parent, Agent, Backend, Repo, Base, ID, SignalID, RelatedTaskID, Runtime, Role string }
+
+func (s Service) sendMessage(ctx context.Context, task Task, body string) (string, error) {
+	if s.messageDelivery != nil {
+		return s.messageDelivery(ctx, task, body)
+	}
+	return s.Message(ctx, task, body)
+}
+
+type RunOptions struct {
+	Prompt, Parent, Agent, Backend, Repo, Base, ID            string
+	SignalID, RelatedTaskID, Runtime, Role                    string
+	Identity, Profile, Requester, RequesterSource, ExternalID string
+	Context                                                   map[string]string
+	provenance                                                TaskProvenance
+}
 
 func ValidateStateHome(home, repo string) error {
 	if rel, err := filepath.Rel(repo, home); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
@@ -24,6 +42,67 @@ func ValidateStateHome(home, repo string) error {
 
 func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	var empty Task
+	if o.Parent != "" {
+		parent, err := s.Store.Get(o.Parent)
+		if err != nil {
+			return empty, err
+		}
+		caller, err := LocalCaller()
+		if err != nil {
+			return empty, err
+		}
+		if parent.Provenance.Caller != "" && parent.Provenance.Caller != caller {
+			return empty, fmt.Errorf("caller is not the owner of parent task %s", parent.ID)
+		}
+		o.Parent = parent.ID
+		if o.Identity == "" {
+			o.Identity = parent.Provenance.Identity
+		}
+		if o.Profile == "" {
+			o.Profile = parent.Provenance.Profile
+		}
+		if parent.Provenance.Profile == "investigation" && normalizedProfile(o.Profile) != "investigation" {
+			return empty, fmt.Errorf("child task cannot exceed its parent's investigation profile")
+		}
+	}
+	provenance, err := s.resolveProvenance(o)
+	if err != nil {
+		return empty, err
+	}
+	o.provenance = provenance
+	if provenance.ExternalID != "" {
+		prior, found, err := s.Store.FindExternal(provenance.Caller, provenance.RequesterSource, provenance.ExternalID)
+		if err != nil {
+			return empty, err
+		}
+		if found {
+			if prior.RuntimeName() != "openshell" {
+				return prior, fmt.Errorf("task %s used the host runtime; agent execution requires OpenShell", prior.ID)
+			}
+			if o.Repo != "" {
+				requested, resolveErr := ResolveRepoArgument(s.Store.Home, o.Repo)
+				if resolveErr != nil {
+					return prior, resolveErr
+				}
+				repository, discoverErr := discoverRepository(ctx, requested)
+				if discoverErr != nil {
+					return prior, discoverErr
+				}
+				if repository.Root != prior.Repo {
+					return prior, fmt.Errorf("external ID already belongs to task %s in a different repository", prior.ID)
+				}
+			}
+			requestedAgent := o.Agent
+			if requestedAgent == "" {
+				requestedAgent = "codex"
+			}
+			if prior.Prompt != o.Prompt || (o.Identity != "" && prior.Provenance.Identity != o.Identity) || prior.Provenance.Profile != provenance.Profile || prior.Provenance.Requester != o.Requester || !maps.Equal(prior.Provenance.Context, o.Context) || prior.Session.Agent != requestedAgent ||
+				(o.Base != "" && o.Base != prior.Base) || (o.Parent != "" && o.Parent != prior.ParentID) || (o.Runtime != "" && o.Runtime != prior.RuntimeName()) || (o.Backend != "" && o.Backend != "auto" && o.Backend != prior.Session.Backend) || (o.Role != "" && o.Role != prior.Role) || (o.SignalID != "" && o.SignalID != prior.SignalID) || (o.RelatedTaskID != "" && o.RelatedTaskID != prior.RelatedTaskID) {
+				return prior, fmt.Errorf("external ID already belongs to task %s with different dispatch data", prior.ID)
+			}
+			return prior, nil
+		}
+	}
 	if o.Runtime == "" {
 		var err error
 		o.Runtime, err = s.Store.DefaultRuntime()
@@ -31,8 +110,11 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 			return empty, err
 		}
 	}
-	if o.Runtime != "host" && o.Runtime != "openshell" {
-		return empty, fmt.Errorf("unknown runtime %q (use openshell or host)", o.Runtime)
+	if o.Runtime != "openshell" {
+		return empty, fmt.Errorf("agent execution requires OpenShell; host runtime is unavailable")
+	}
+	if o.Role != "" {
+		return empty, fmt.Errorf("Team Principal requires a supported OpenShell execution path")
 	}
 	if o.Role != "" && (o.Role != "tp" || o.Runtime != "host") {
 		return empty, fmt.Errorf("Team Principal requires the host runtime")
@@ -75,84 +157,7 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	if err != nil {
 		return empty, err
 	}
-	if o.Runtime == "openshell" {
-		return s.runOpenShell(ctx, o, repo)
-	}
-	trusted, err := RepoTrusted(s.Store.Home, repo.CommonDir)
-	if err != nil {
-		return empty, err
-	}
-	agentPath, err := executable("PADDOCK_"+strings.ToUpper(o.Agent)+"_BIN", o.Agent)
-	if err != nil {
-		return empty, fmt.Errorf("%s is not installed or executable: %w", o.Agent, err)
-	}
-	_, session, err := SelectTerminal(ctx, o.Backend)
-	if err != nil {
-		return empty, err
-	}
-	id := o.ID
-	if id == "" {
-		id = newID()
-	}
-	if !validID(id) {
-		return empty, fmt.Errorf("invalid reserved task ID")
-	}
-	session.Agent = o.Agent
-	session.Generation = 1
-	if o.Agent == "codex" {
-		session.AgentHome = os.Getenv("CODEX_HOME")
-		if session.AgentHome == "" {
-			if h, e := os.UserHomeDir(); e == nil {
-				session.AgentHome = filepath.Join(h, ".codex")
-			}
-		}
-	}
-	if o.Agent == "claude" {
-		session.ConversationID = newConversationID()
-		session.AgentHome = os.Getenv("CLAUDE_CONFIG_DIR")
-		if session.AgentHome == "" {
-			if h, e := os.UserHomeDir(); e == nil {
-				session.AgentHome = filepath.Join(h, ".claude")
-			}
-		}
-	}
-	if session.AgentHome != "" {
-		session.AgentHome, err = filepath.Abs(session.AgentHome)
-		if err != nil {
-			return empty, err
-		}
-	}
-	session.TrustProject = trusted && o.Agent == "codex"
-	session.AgentPath = agentPath
-	session.Name = "paddock-" + id
-	if o.Role == "tp" {
-		session.Name = "team-principal-" + id
-	}
-	t := Task{ID: id, Role: o.Role, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
-		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
-	// Never put state or new worktrees inside the caller's checkout.
-	t.Runtime = "host"
-	if err = ValidateStateHome(s.Store.Home, repo.Root); err != nil {
-		return empty, err
-	}
-	if err = s.Store.Insert(t); err != nil {
-		return empty, err
-	}
-	fail := func(cause error) (Task, error) {
-		if e := s.Store.Status(id, "failed", cause.Error(), "preparing", "starting"); e != nil {
-			return t, fmt.Errorf("task %s: %v; recording failure: %w", id, cause, e)
-		}
-		current, _ := s.Store.Get(id)
-		return current, fmt.Errorf("task %s: %w (inspect with paddock show %s)", id, cause, id)
-	}
-	if err = CreateWorktree(ctx, t); err != nil {
-		return fail(err)
-	}
-	if err = s.Store.Status(id, "starting", ""); err != nil {
-		return t, err
-	}
-	t.Status = "starting"
-	return s.launchTask(ctx, t)
+	return s.runOpenShell(ctx, o, repo)
 }
 
 func (s Service) launchTask(ctx context.Context, t Task) (Task, error) {
@@ -225,6 +230,22 @@ func (s Service) Refresh(ctx context.Context, t Task) (Task, Observation, error)
 	}
 	// starting has a grace period: another CLI may inspect between intent and launch.
 	age, _ := time.Parse(time.RFC3339Nano, t.UpdatedAt)
+	if t.Status == "preparing" && time.Since(age) > 2*time.Minute {
+		active, err := s.Store.preparationActive(t.ID)
+		if err != nil {
+			return t, obs, err
+		}
+		if !active {
+			if err := s.Store.update(t.ID, func(current *Task) error {
+				if current.Status == "preparing" {
+					current.Status, current.Error, current.LastActivityAt = "interrupted", "task preparation ended without a recorded launch", now()
+				}
+				return nil
+			}); err != nil {
+				return t, obs, err
+			}
+		}
+	}
 	if (t.Status == "running" || (t.Status == "starting" && time.Since(age) > 30*time.Second)) && (obs.State == "missing" || obs.State == "exited") {
 		if err := s.Store.update(t.ID, func(current *Task) error {
 			if current.Session.Generation == t.Session.Generation && current.Status == t.Status {

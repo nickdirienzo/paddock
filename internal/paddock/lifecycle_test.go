@@ -45,26 +45,18 @@ func TestSupervisorRecordsExitAndLiteralPrompt(t *testing.T) {
 	}
 	c := exec.Command(exe, "__run", v.ID)
 	c.Env = append(os.Environ(), "PADDOCK_HOME="+s.Home)
-	if b, e := c.CombinedOutput(); e == nil {
-		t.Fatal("expected exit 7")
-	} else if ee, ok := e.(*exec.ExitError); !ok || ee.ExitCode() != 7 {
-		got, _ := s.Get(v.ID)
-		t.Fatalf("%v: %s (recorded error: %s)", e, b, got.Error)
+	if b, e := c.CombinedOutput(); e == nil || !strings.Contains(string(b), "host agent execution is unavailable") {
+		t.Fatalf("host supervisor was accepted: %v %s", e, b)
 	}
 	got, e := s.Get(v.ID)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got.Status != "failed" || got.Session.ExitCode == nil || *got.Session.ExitCode != 7 {
+	if got.Status != v.Status || got.Session.ExitCode != nil {
 		t.Fatalf("%+v", got)
 	}
-	b, e := os.ReadFile(filepath.Join(v.Worktree, "received"))
-	if e != nil || !strings.HasPrefix(string(b), v.Prompt) {
-		t.Fatalf("prompt changed: %q %v", b, e)
-	}
-	b, e = os.ReadFile(filepath.Join(v.Worktree, "identity"))
-	if e != nil || string(b) != v.ID {
-		t.Fatalf("identity: %q %v", b, e)
+	if _, e = os.Stat(filepath.Join(v.Worktree, "received")); !os.IsNotExist(e) {
+		t.Fatal("host agent executed")
 	}
 	if _, e = os.Stat(filepath.Join(v.Worktree, "INJECTION")); !os.IsNotExist(e) {
 		t.Fatal("prompt executed as shell")
@@ -72,6 +64,7 @@ func TestSupervisorRecordsExitAndLiteralPrompt(t *testing.T) {
 }
 
 func TestAgentSpawnFailureIsDurable(t *testing.T) {
+	t.Skip("host agent supervisor is disabled")
 	exe := buildCLI(t)
 	s := openTestStore(t, t.TempDir())
 	v := taskFixture()

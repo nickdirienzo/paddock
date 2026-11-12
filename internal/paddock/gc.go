@@ -262,6 +262,9 @@ func pushedWorkspace(ctx context.Context, t Task) error {
 }
 
 func (s Service) noPendingWork(id string) error {
+	if err := s.noPendingAccess(id); err != nil {
+		return err
+	}
 	state, err := s.Store.GitHubState()
 	if err != nil {
 		return err

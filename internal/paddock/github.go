@@ -62,6 +62,9 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	}
 	var pinned *GitHubIdentityBinding
 	if task.OpenShell != nil {
+		if task.OpenShell.Provider == "" {
+			return fmt.Errorf("task has no GitHub App identity for PR watching")
+		}
 		pinned = &task.OpenShell.Identity
 	}
 	api, _, err := g.remoteFor(state, repo, pinned)

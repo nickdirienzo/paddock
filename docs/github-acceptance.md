@@ -1,8 +1,13 @@
 # GitHub coordination acceptance evidence
 
+This file records historical checks. Host agent execution and model-backed
+planning described below are unavailable under the current OpenShell-only
+runtime. See [current identity acceptance](identity-acceptance.md) for live
+validation of the new execution path.
+
 ## Claude delivery — 2026-11-09
 
-Native message routing now supports Claude in host and OpenShell tasks. Host
+Native message routing supported Claude in host and OpenShell tasks. Host
 qualification used the installed Claude Code 2.1.286 in an already trusted
 directory, with its existing login, workspace trust and tool permissions. A
 disposable interactive session admitted the message through its Unix inbox,

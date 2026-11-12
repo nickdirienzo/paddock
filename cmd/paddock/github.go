@@ -24,7 +24,7 @@ const githubHelp = `GitHub coordination:
   paddock github unroute <pattern>
   paddock github identities
   paddock github watch <PR-URL> --task <id> --allow <account,account>
-  paddock github routing <PR-URL> --mode direct|planner [--tasks id,id] [--repos alias,path] [--model MODEL]
+  paddock github routing <PR-URL> --mode direct
   paddock github unwatch <PR-URL>
   paddock github start [--interval 30s]
   paddock github stop
@@ -111,6 +111,20 @@ func runGitHub(args []string, out io.Writer) error {
 		return emit(out, entries)
 
 	case "auth":
+		name := flags["name"]
+		if name == "" {
+			name = "default"
+		}
+		if strings.ContainsAny(name, "/ *\\\t\n") || name == "" {
+			return fmt.Errorf("identity name must be a simple local name")
+		}
+		caller, e := paddock.LocalCaller()
+		if e != nil {
+			return e
+		}
+		if prior, exists := state.Identities[name]; exists && prior.Owner != "" && prior.Owner != caller {
+			return fmt.Errorf("caller is not the owner of identity %q", name)
+		}
 		identity := paddock.GitHubIdentity{Mode: flags["mode"], Login: flags["login"]}
 		if identity.Mode == "app" {
 			config := paddock.GitHubAppConfig{}
@@ -154,20 +168,28 @@ func runGitHub(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if identity.App != nil && identity.App.KeyFile != "" {
-			identity.App.KeyFile, err = paddock.ImportGitHubAppKey(identity.App.AppID, identity.App.KeyFile)
+		if identity.Mode == "app" {
+			identity.BotUserID, err = paddock.NewGitHubAPI(identity).BotUserID(ctx, identity.Login)
 			if err != nil {
 				return err
 			}
 		}
-		name := flags["name"]
-		if name == "" {
-			name = "default"
-		}
-		if strings.ContainsAny(name, "/ *\\\t\n") || name == "" {
-			return fmt.Errorf("identity name must be a simple local name")
+		if identity.App != nil && identity.App.KeyFile != "" {
+			identity.App.KeyFile, err = paddock.ImportGitHubAppKeyForIdentity(identity.App.AppID, name, identity.App.KeyFile)
+			if err != nil {
+				return err
+			}
 		}
 		if err = store.UpdateGitHub(func(v *paddock.GitHubState) error {
+			if previous, exists := v.Identities[name]; exists {
+				if previous.Owner != "" && previous.Owner != caller {
+					return fmt.Errorf("caller is not the owner of identity %q", name)
+				}
+				identity.Owner, identity.CreatedAt, identity.Profiles = previous.Owner, previous.CreatedAt, previous.Profiles
+				identity.Disabled = previous.Disabled
+			} else {
+				identity.Owner, identity.CreatedAt = caller, time.Now().UTC().Format(time.RFC3339Nano)
+			}
 			v.Identities[name] = identity
 			if flags["name"] == "" {
 				v.Routes["*"] = name
@@ -183,12 +205,36 @@ func runGitHub(args []string, out io.Writer) error {
 		}
 		fmt.Fprintln(out, pos[0], "->", flags["identity"])
 	case "unroute":
-		if err = store.UpdateGitHub(func(v *paddock.GitHubState) error { delete(v.Routes, strings.ToLower(pos[0])); return nil }); err != nil {
+		caller, e := paddock.LocalCaller()
+		if e != nil {
+			return e
+		}
+		pattern := strings.ToLower(pos[0])
+		if err = store.UpdateGitHub(func(v *paddock.GitHubState) error {
+			if name, ok := v.Routes[pattern]; ok {
+				owner := v.Identities[name].Owner
+				if owner != "" && owner != caller {
+					return fmt.Errorf("caller is not the owner of repository route %q", pattern)
+				}
+			}
+			delete(v.Routes, pattern)
+			return nil
+		}); err != nil {
 			return err
 		}
 		fmt.Fprintln(out, "Removed route", pos[0])
 	case "identities":
-		return emit(out, state.Identities)
+		caller, e := paddock.LocalCaller()
+		if e != nil {
+			return e
+		}
+		owned := map[string]paddock.GitHubIdentity{}
+		for name, identity := range state.Identities {
+			if identity.Owner == "" || identity.Owner == caller {
+				owned[name] = identity
+			}
+		}
+		return emit(out, owned)
 	case "watch":
 		if flags["task"] == "" || flags["allow"] == "" {
 			return fmt.Errorf("watch requires --task and --allow")
@@ -203,6 +249,9 @@ func runGitHub(args []string, out io.Writer) error {
 		}
 		fmt.Fprintln(out, "Shared GitHub poller running, PID", status.PID)
 	case "routing":
+		if flags["mode"] == "planner" {
+			return fmt.Errorf("planner routing requires OpenShell and is currently unavailable; use --mode direct")
+		}
 		if err = coordinator.ConfigureRouting(ctx, pos[0], flags["mode"], flags["model"], csv(flags["tasks"]), csv(flags["repos"])); err != nil {
 			return err
 		}
