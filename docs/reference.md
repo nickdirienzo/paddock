@@ -186,11 +186,11 @@ paddock repo trust project
 paddock repo untrust project
 ```
 
-Both commands accept an alias or a repository path. Trust is opt-in and belongs to the canonical Git common directory, so linked worktrees and delegated Codex children share the decision. Removing an alias does not revoke trust; use `untrust` first, or pass the repository path afterward.
+Both commands accept an alias or a repository path. Trust is opt-in and belongs to the canonical Git common directory, so linked worktrees and delegated children share the decision. Removing an alias does not revoke trust; use `untrust` first, or pass the repository path afterward.
 
-For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. This avoids the repeated folder trust prompt and allows Codex to load that project's configuration. It does not edit your global Codex config or add approval/sandbox bypass flags. Claude's folder trust remains managed by Claude. Rex Remote Control is a separate app setting.
+For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. For new OpenShell Claude tasks, Paddock records the same opt-in trust decision in that task's isolated Claude config before launch. Claude 2.1.286 keeps this decision in its private `projects.<path>.hasTrustDialogAccepted` state; Paddock changes only that field and leaves native tool approvals enabled. It does not edit your host Claude or Codex config or add permission bypass flags. Rex Remote Control is a separate app setting.
 
-Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in Codex.
+Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in either agent.
 
 Trusted host MCP connections are unavailable for agent tasks because tool calls
 must execute inside OpenShell. Remove existing grants with `paddock repo untrust

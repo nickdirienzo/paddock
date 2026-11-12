@@ -91,8 +91,8 @@ Linux protocol tests cover accepted, held/refused, missing, and stale-generation
 inboxes. Held/refused or uncertain deliveries do not receive a success receipt and
 are never blindly retried. The ordinary GitHub poller's existing receipt/deduplication
 path is reused; no new poller, model planner, or terminal typing is involved. Host
-Claude message routing remains unsupported. Native workspace trust and tool
-approvals remain enabled.
+Claude message routing remains unsupported. Claude keeps native tool
+approvals; untrusted repositories still receive the workspace trust prompt.
 
 The remainder records the earlier standalone experiment and its findings at that
 time; it is not a description of the current implementation.

@@ -154,6 +154,23 @@ changed.
   checkout rename denied, then a clean `git status --porcelain`. A separate
   unguarded OpenShell inspection confirmed UID 0 owns `/sandbox`, the checkout,
   and Git database; only `/sandbox/.paddock` was UID 1000 and writable.
+- App-backed Claude investigation `73508c50a502989a5e4df85d` completed the
+  same four denial checks after the operator accepted its native workspace
+  trust prompt. A separate OpenShell `git status --porcelain` was empty and
+  `HEAD` matched the base commit. Its older task record lacked a verified guard
+  marker, so Paddock correctly held a requested follow-up instead of
+  delivering it to an unverified investigation session.
+- The replacement App-backed Claude investigation
+  `0cd4c9feb72ede9bade351c5` launched with guard version 5 and explicit
+  `paddock repo trust`. Claude skipped the workspace trust prompt and completed
+  its first turn. The native reply reported file creation, Unix socket
+  binding, `chmod`, and checkout rename all denied. A follow-up delivered to
+  the saved Claude conversation completed a second turn; replaying its
+  external ID returned the original receipt without another delivery.
+  Independent OpenShell Git checks found a clean worktree and the original
+  base commit, while App-backed artifact lookup found no commits, untracked
+  files, or pull requests. Unused network proposals still report `blocked:
+  true` independently of the completed turns.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -179,14 +196,7 @@ retrieval also queries GitHub for closed or unwatched PRs on the task's exact
 branch using its pinned App;
 lookup failures are reported separately from local workspace artifacts.
 
-## Remaining end-to-end checks
+## Operational follow-up
 
-- Revalidate all execution paths after disabling host agents, Team Principal,
-  model-backed planning, and trusted host MCP tools. The corresponding commands
-  now fail closed; the App-backed Codex implementation path completed its test,
-  commit, and draft PR.
-- Recheck Claude's native turn and follow-up under a version-5 root-owned
-  checkout. Its version-3 model path and version-4 Codex metadata boundary
-  have passed independently.
 - Define retention and distribution for task-specific investigation images
   beyond the local Docker-backed gateway.

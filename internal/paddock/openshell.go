@@ -271,7 +271,7 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 	if e != nil {
 		return t, e
 	}
-	session.TrustProject = trusted && o.Agent == "codex"
+	session.TrustProject = trusted
 	o.provenance.Identity = binding.Name
 	o.provenance.Capabilities = executionCapabilities(o.Profile, githubApp)
 	author, mail, provider := binding.Name, binding.Name+"@paddock.invalid", ""
@@ -562,6 +562,9 @@ chmod 700 /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
 	}
 	if _, e = sandboxOutput(ctx, *t, t.Session.AgentPath, "--version"); e != nil {
 		return fmt.Errorf("sandbox image must provide %s: %w", t.Session.AgentPath, e)
+	}
+	if e = installClaudeProjectTrust(ctx, *t); e != nil {
+		return e
 	}
 	if e = installHostShellShortcut(ctx, *t); e != nil {
 		return fmt.Errorf("install host shell shortcut: %w", e)
