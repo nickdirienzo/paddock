@@ -86,6 +86,19 @@ changed.
   in `/sandbox/worktree` with `EACCES` and allowed one in
   `/home/sandbox/.claude`; the probe sandbox was deleted. Paddock records guard
   version 2 and refuses resume or messaging for older guarded tasks.
+- The first guard-version-2 Claude launch (`a499bc64fbf49533b884257a`) passed
+  preparation but Claude exited before trust: it requires its socket's parent
+  directory to be private, and trusted bootstrap had created `.claude` with
+  mode `0755`. Preparation now sets mode `0700`. A second version-2 launch
+  (`968611316b6af52da3ee91f1`) created the socket in that private directory
+  and reached native workspace trust. The operator accepted trust, and Paddock
+  observed `last_turn.state: inProgress`. Claude then reported a refused model
+  connection. OpenShell logs showed its proxy could not read the non-dumpable
+  trusted launcher's `/proc/<pid>/exe` while resolving the requesting binary;
+  there was no pending policy proposal and the model provider was refreshed.
+  The sandbox was stopped. A completed Claude model turn still requires a
+  launcher design that protects the investigation boundary while permitting
+  OpenShell's process identity check.
 - A further guarded probe showed that `chmod` on a temporary worktree file
   still succeeds. Landlock enforces the tested file-content write denial but
   does not make worktree metadata immutable. The temporary file was removed;
@@ -135,7 +148,7 @@ lookup failures are reported separately from local workspace artifacts.
   commit, and draft PR.
 - Launch a new Claude investigation with the rebuilt image, complete native
   workspace trust, and verify its write denial, clean worktree, and follow-up
-  behavior.
+  behavior after resolving the proxy's process identity check.
 - Prevent investigation agents from changing checkout metadata such as file
   modes while preserving writable home and build scratch space.
 - Verify Claude's new native transcript turn-completion signal in a live

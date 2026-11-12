@@ -520,6 +520,7 @@ git --git-dir=/sandbox/repository.git config user.email "$4"
 git --git-dir=/sandbox/repository.git -c core.hooksPath=/dev/null worktree add -b "$2" /sandbox/worktree refs/heads/seed
 rm /sandbox/seed.bundle
 mkdir -p /home/sandbox/.codex /home/sandbox/.claude
+chmod 700 /home/sandbox/.codex /home/sandbox/.claude
 `
 	remoteURL := ""
 	if t.OpenShell.Provider != "" {
