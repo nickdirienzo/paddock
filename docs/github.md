@@ -253,6 +253,10 @@ OpenShell.
 After upgrading, restart any running poller with the upgraded CLI's `github stop`
 and `github start` commands before registering wildcard watches. Registration
 refuses an older running poller rather than saving a policy it cannot enforce.
+The identity and OpenShell-only release also requires a version-7 poller before
+new tasks launch. After that restart, watches for legacy host tasks remain
+registered but cannot deliver comments; finish those tasks before cutting over
+if their watches still need delivery.
 
 Registering a watch starts or reuses **one background poller per registry**. It survives
 the registering CLI and individual agents exiting. It does not start automatically at
