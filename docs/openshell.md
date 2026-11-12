@@ -102,11 +102,15 @@ additionally validates the provider profile, credentials, image, and agent binar
 Investigation tasks seed their private Git checkout before agent startup, then
 launch the agent and its native daemon under a second Landlock layer. Source
 file contents and the private Git database reject agent writes; its home, `/tmp`,
-Go cache, and Go module cache remain writable. The trusted sandbox launcher is
+Go cache, and Go module cache remain writable. Claude's inbox socket lives in
+`/home/sandbox/.claude`, so the guard also denies socket creation in the
+checkout. Rebuild and pin the runtime image after updating Paddock; an older
+image cannot launch a guarded Claude investigation. The trusted sandbox launcher is
 non-dumpable so an agent running under the same Unix UID cannot inspect its
-memory. Preparation probes that the worktree rejects writes and scratch accepts
-them; failure stops launch. An older investigation task without this verified
-guard cannot resume or receive a follow-up; create a new task. The OpenShell
+memory. Preparation probes that the worktree rejects file and socket creation
+while scratch accepts them; failure stops launch. An older investigation task
+without the current verified guard cannot resume or receive a follow-up; create
+a new task. The OpenShell
 startup policy still limits the entire sandbox's host and network access.
 Linux Landlock does not restrict metadata operations such as `chmod`; a live
 probe could change the mode of a temporary worktree file. Investigation tasks

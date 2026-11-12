@@ -128,7 +128,7 @@ func (s Service) Resume(ctx context.Context, id string) (Task, error) {
 	if t.RuntimeName() != "openshell" {
 		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
 	}
-	if t.Provenance.Profile == "investigation" && (t.OpenShell == nil || !t.OpenShell.ReadOnlyGuard) {
+	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
 		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
 	}
 	release, err := s.Store.taskLease(t.ID, "operation")
@@ -158,7 +158,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	if t.RuntimeName() != "openshell" {
 		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
 	}
-	if t.Provenance.Profile == "investigation" && (t.OpenShell == nil || !t.OpenShell.ReadOnlyGuard) {
+	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
 		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
 	}
 	t, obs, err := s.Refresh(ctx, t)

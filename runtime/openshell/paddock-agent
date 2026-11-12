@@ -52,7 +52,8 @@ if claude:
     version = subprocess.check_output([sys.argv[2], '--version'], text=True).strip()
     if version != '2.1.286 (Claude Code)':
         sys.exit('Claude inbox delivery requires qualified Claude Code 2.1.286.')
-    agent_args = [sys.argv[2], '--messaging-socket-path', '/sandbox/claude.sock'] + sys.argv[3:]
+    inbox = pathlib.Path(os.environ.get('CLAUDE_CONFIG_DIR', '/home/sandbox/.claude')) / 'paddock-inbox.sock'
+    agent_args = [sys.argv[2], '--messaging-socket-path', str(inbox)] + sys.argv[3:]
 # The child owns native approvals and turn completion; never infer idle from PTY output.
 child = subprocess.Popen(agent_args)
 if claude:

@@ -32,19 +32,20 @@ type OpenShellConfig struct {
 	Providers      map[string]string `json:"agent_providers"`
 }
 type OpenShellTask struct {
-	AgentProxy          string                `json:"agent_proxy"`
-	ID                  string                `json:"id,omitempty"`
-	Config              OpenShellConfig       `json:"config"`
-	Name                string                `json:"name"`
-	Provider            string                `json:"provider"`
-	Repository          string                `json:"repository"`
-	Identity            GitHubIdentityBinding `json:"identity"`
-	GitAuthorName       string                `json:"git_author_name,omitempty"`
-	GitAuthorEmail      string                `json:"git_author_email,omitempty"`
-	CredentialExpiresAt time.Time             `json:"credential_expires_at,omitempty"`
-	CredentialError     string                `json:"credential_error,omitempty"`
-	ReadOnlyGuard       bool                  `json:"read_only_guard,omitempty"`
-	Ready               bool                  `json:"ready"`
+	AgentProxy           string                `json:"agent_proxy"`
+	ID                   string                `json:"id,omitempty"`
+	Config               OpenShellConfig       `json:"config"`
+	Name                 string                `json:"name"`
+	Provider             string                `json:"provider"`
+	Repository           string                `json:"repository"`
+	Identity             GitHubIdentityBinding `json:"identity"`
+	GitAuthorName        string                `json:"git_author_name,omitempty"`
+	GitAuthorEmail       string                `json:"git_author_email,omitempty"`
+	CredentialExpiresAt  time.Time             `json:"credential_expires_at,omitempty"`
+	CredentialError      string                `json:"credential_error,omitempty"`
+	ReadOnlyGuard        bool                  `json:"read_only_guard,omitempty"`
+	ReadOnlyGuardVersion int                   `json:"read_only_guard_version,omitempty"`
+	Ready                bool                  `json:"ready"`
 }
 
 func (t Task) RuntimeName() string {
@@ -537,6 +538,9 @@ mkdir -p /home/sandbox/.codex /home/sandbox/.claude
 		return e
 	}
 	t.OpenShell.ReadOnlyGuard = t.Provenance.Profile == "investigation"
+	if t.OpenShell.ReadOnlyGuard {
+		t.OpenShell.ReadOnlyGuardVersion = investigationGuardVersion
+	}
 	t.OpenShell.Ready = true
 	return nil
 }

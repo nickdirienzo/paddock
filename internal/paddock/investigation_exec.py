@@ -21,7 +21,6 @@ class PathRule(ctypes.Structure):
 
 
 WRITE_FILE = 1 << 1
-MAKE_SOCK = 1 << 9
 TRUNCATE = 1 << 14
 WRITE_RIGHTS = WRITE_FILE | TRUNCATE | sum(1 << bit for bit in range(4, 14))
 LIBC = ctypes.CDLL(None, use_errno=True)
@@ -52,9 +51,6 @@ def restrict():
     try:
         for path in ("/home/sandbox", "/tmp", "/sandbox/go-cache", "/sandbox/go-path"):
             add_rule(ruleset_fd, path, WRITE_RIGHTS)
-        # Claude's qualified native inbox binds /sandbox/claude.sock.  This
-        # permits socket creation, never source-file creation or modification.
-        add_rule(ruleset_fd, "/sandbox", MAKE_SOCK)
         for path in ("/dev/null", "/dev/tty"):
             add_rule(ruleset_fd, path, WRITE_FILE | TRUNCATE)
         if LIBC.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS

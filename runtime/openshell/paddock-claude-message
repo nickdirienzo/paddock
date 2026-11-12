@@ -22,7 +22,7 @@ def deliver(root, conversation, generation, body, timeout=15, home='/home/sandbo
         if state['conversation'] != conversation or state['generation'] != generation:
             connection.close()
             return 'offline'
-        connection.connect(str(root / 'claude.sock'))
+        connection.connect(str(pathlib.Path(home) / 'paddock-inbox.sock'))
         pid, _, uid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         if pid != state['pid'] or uid != (root / 'claude-process.json').stat().st_uid:
             connection.close()

@@ -77,9 +77,15 @@ changed.
   succeeded. Its native turn completed, and Paddock returned no untracked
   files, commits, patch, or PR. A same-UID sandbox process could not open the
   trusted launcher process's memory. A guarded Claude investigation
-  (`4c0f3f80aece9d64240c3d6b`) launched and created its native inbox socket;
-  Claude is awaiting the operator's workspace trust decision before its first
-  model turn.
+  (`4c0f3f80aece9d64240c3d6b`) launched and reached native workspace trust
+  before its first model turn. That older task was stopped before trust was
+  granted because its guard permitted Unix socket creation in the checkout.
+- The runtime now places Claude's native inbox socket in its writable home.
+  A rebuilt image passed its Linux inbox protocol tests. A credential-free
+  OpenShell probe running the revised investigation guard denied a socket bind
+  in `/sandbox/worktree` with `EACCES` and allowed one in
+  `/home/sandbox/.claude`; the probe sandbox was deleted. Paddock records guard
+  version 2 and refuses resume or messaging for older guarded tasks.
 - A further guarded probe showed that `chmod` on a temporary worktree file
   still succeeds. Landlock enforces the tested file-content write denial but
   does not make worktree metadata immutable. The temporary file was removed;
@@ -93,13 +99,13 @@ changed.
   confirmed absent. OpenShell 0.1.6 also keeps filesystem and process policy
   fixed after workload start, as described in its
   [policy management guide](https://docs.nvidia.com/openshell/v0.1.6/how-it-works/policies/manage-policies).
-- A rebuilt CLI read the still-running Claude task's pinned native transcript
+- A rebuilt CLI read the Claude task's pinned native transcript
   inside OpenShell while its workspace trust prompt was open. `show --json`
   returned `last_turn.state: none`, without sending transcript content to the
   host. The same structural reader identified completed turns in five existing
   Claude session logs and an unfinished final prompt in a sixth; its focused
-  fixture also covers queued follow-ups and partial transcript appends. A live
-  Claude model turn remains pending human workspace trust.
+  fixture also covers queued follow-ups and partial transcript appends. A new
+  Claude model turn will require human workspace trust.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -127,8 +133,9 @@ lookup failures are reported separately from local workspace artifacts.
   model-backed planning, and trusted host MCP tools. The corresponding commands
   now fail closed; the App-backed Codex implementation path completed its test,
   commit, and draft PR.
-- Finish the Claude investigation after native workspace trust and verify its
-  write denial, clean worktree, and follow-up behavior.
+- Launch a new Claude investigation with the rebuilt image, complete native
+  workspace trust, and verify its write denial, clean worktree, and follow-up
+  behavior.
 - Prevent investigation agents from changing checkout metadata such as file
   modes while preserving writable home and build scratch space.
 - Verify Claude's new native transcript turn-completion signal in a live

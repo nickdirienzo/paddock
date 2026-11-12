@@ -119,7 +119,7 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		fmt.Fprintln(os.Stderr, "host agent execution is unavailable; use OpenShell")
 		return 1
 	}
-	if t.Provenance.Profile == "investigation" && (t.OpenShell == nil || !t.OpenShell.ReadOnlyGuard) {
+	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
 		fmt.Fprintln(os.Stderr, "investigation task has no verified read-only guard")
 		return 1
 	}
