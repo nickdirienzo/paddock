@@ -44,6 +44,42 @@ func TestRepositoryTokenIsNarrowAndUncached(t *testing.T) {
 		t.Fatal("task tokens must not reuse installation-wide auth cache")
 	}
 }
+
+func TestVerifyExecutionProfilesChecksGitHubGrant(t *testing.T) {
+	_, key := appKeyFixture(t)
+	t.Setenv("PADDOCK_GITHUB_PRIVATE_KEY", string(key))
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body struct {
+			Repositories []string          `json:"repositories"`
+			Permissions  map[string]string `json:"permissions"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || r.URL.Path != "/app/installations/2/access_tokens" || len(body.Repositories) != 1 || body.Repositories[0] != "project" {
+			t.Errorf("incorrect verification request: %+v %s", body, r.URL.Path)
+		}
+		level := body.Permissions["contents"]
+		if level != "read" && level != "write" {
+			t.Errorf("unexpected token scope: %+v", body.Permissions)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_discarded", "expires_at": time.Now().Add(time.Hour), "repositories": []any{map[string]string{"full_name": "team/project"}}, "permissions": map[string]string{"contents": level, "pull_requests": level, "issues": level}})
+	}))
+	defer server.Close()
+	auth := newGitHubAppAuth(GitHubAppConfig{AppID: 1, InstallationID: 2, KeyEnvironment: true})
+	auth.baseURL = server.URL
+	api := GitHubAPI{Identity: GitHubIdentity{Mode: "app"}, app: auth}
+	for _, profile := range []string{"investigation", "implementation"} {
+		if err := api.VerifyExecutionProfile(context.Background(), "team/project", profile); err != nil {
+			t.Fatal(profile, err)
+		}
+	}
+	if calls != 2 || auth.token != "" {
+		t.Fatal("verification reused or retained a task token")
+	}
+	if err := api.VerifyExecutionProfile(context.Background(), "team/project", "privileged"); err == nil {
+		t.Fatal("accepted an unknown profile")
+	}
+}
 func TestRepositoryTokenRejectsBroaderGrant(t *testing.T) {
 	_, key := appKeyFixture(t)
 	t.Setenv("PADDOCK_GITHUB_PRIVATE_KEY", string(key))
@@ -73,7 +109,7 @@ func TestOpenShellDefaultFailsClosedBeforeLaunch(t *testing.T) {
 	s := openTestStore(t, t.TempDir())
 	repo := repoFixture(t)
 	_, e := (Service{Store: s}).Run(context.Background(), RunOptions{Repo: repo, Prompt: "hello"})
-	if e == nil || !strings.Contains(e.Error(), "default runtime") {
+	if e == nil || !strings.Contains(e.Error(), "OpenShell is required") {
 		t.Fatalf("missing setup must not run on host: %v", e)
 	}
 	tasks, _ := s.List("")
@@ -82,6 +118,54 @@ func TestOpenShellDefaultFailsClosedBeforeLaunch(t *testing.T) {
 	}
 	if (Task{}).RuntimeName() != "host" {
 		t.Fatal("legacy task migrated implicitly")
+	}
+}
+
+func TestUnbackedLogicalIdentityPreparesLocalOnlyOpenShellTask(t *testing.T) {
+	store := openTestStore(t, t.TempDir())
+	caller, err := LocalCaller()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateIdentity("local", caller, nil); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "openshell-calls")
+	client := script(t, `printf '%s\n' "$*" >> `+quote(log)+`
+case "$*" in
+ *--version*) echo 'openshell 0.1.6' ;;
+ *'gateway info'*) echo '{}' ;;
+ *'sandbox create'*) exit 9 ;;
+ *) exit 8 ;;
+esac`)
+	policy := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(policy, []byte(`{"version":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetOpenShellConfig(OpenShellConfig{Binary: client, Gateway: "fixture", Workspace: "default", Image: "sha256:fixture", Policy: policy, Providers: map[string]string{"codex": "model-provider"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PADDOCK_SCREEN_BIN", script(t, `echo 'Screen version fixture'`))
+	repo := repoFixture(t) // intentionally has no GitHub origin
+	for _, profile := range []string{"investigation", "implementation"} {
+		t.Run(profile, func(t *testing.T) {
+			task, err := (Service{Store: store}).Run(context.Background(), RunOptions{Repo: repo, Identity: "local", Profile: profile, Agent: "codex", Backend: "screen", Prompt: "inspect locally"})
+			if err == nil || task.ID == "" || task.OpenShell == nil {
+				t.Fatal("local task was rejected before sandbox preparation", task, err)
+			}
+			if task.Provenance.Identity != "local" || task.Provenance.GitHubActor != "" || task.OpenShell.Provider != "" || task.OpenShell.Repository != "" || task.OpenShell.GitAuthorName != "local" || task.OpenShell.GitAuthorEmail != "local@paddock.invalid" {
+				t.Fatalf("incorrect local identity: %+v", task)
+			}
+			for _, capability := range task.Provenance.Capabilities {
+				if strings.HasPrefix(capability, "github.") || capability == "pull_request.create" {
+					t.Fatal("local identity gained GitHub capability", capability)
+				}
+			}
+		})
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(calls), "sandbox create") || strings.Contains(string(calls), "profile import") || strings.Contains(string(calls), "paddock-") || strings.Count(string(calls), "--provider") != 2 {
+		t.Fatalf("unexpected OpenShell calls: %s %v", calls, err)
 	}
 }
 func TestSandboxCommandNeverInheritsHostCredentials(t *testing.T) {

@@ -247,6 +247,7 @@ func TestHostClaudeUncertainReviewIsNotRetried(t *testing.T) {
 }
 
 func TestHostClaudeSupervisorPublishesAndCleansInbox(t *testing.T) {
+	t.Skip("legacy host agent execution is disabled")
 	exe := buildCLI(t)
 	store := openTestStore(t, t.TempDir())
 	task := taskFixture()

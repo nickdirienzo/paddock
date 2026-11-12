@@ -1,14 +1,87 @@
 # GitHub coordination
 
 Paddock can poll explicitly watched pull requests and route comments to their owning
-local tasks. Codex uses its native session queue and Claude uses its native inbox,
-in both host and OpenShell runtimes. Host Claude supports macOS and Linux and, like
-the OpenShell image, requires qualified Claude Code 2.1.286. Claude's peer-message
+local tasks. Codex uses its native session queue and Claude uses its native inbox
+inside OpenShell. The OpenShell image requires qualified Claude Code 2.1.286. Claude's peer-message
 admission and tool approvals remain in force. Delivery requires a persisted native
 enqueue record; uncertain deliveries are held for inspection. Delegation uses the
 existing task/worktree launcher.
 
 ## Configure a GitHub App
+
+### Create a named Paddock identity and register its App
+
+An identity is a logical Paddock principal. It has a local operating-system owner,
+an allowed execution profile list, and optional GitHub credentials. The GitHub
+actor, requester, and model-provider credentials are separate fields. Each
+engineer can create a different identity; service workflows can use their own
+identity owned by the local service account.
+
+An unbacked identity can run local OpenShell tasks, including a repository
+without a GitHub origin. It receives no GitHub actor, installation token,
+push capability, or PR capability. Associate an App before using that identity
+for GitHub work.
+
+```sh
+paddock identity create mozzie --profiles investigation,implementation
+paddock identity github setup mozzie --app-name mozziebot --visibility any
+```
+
+`setup` starts a temporary loopback callback and prints a local URL. Open it in
+your browser, review the App's name and requested permissions on GitHub, and
+confirm registration. GitHub redirects to the callback with a one-time code;
+Paddock exchanges it within GitHub's one-hour limit and imports the generated
+private key into protected host storage. No permanent HTTP service is started.
+Use `--owner ORGANIZATION` to register under a GitHub organization; omit it for
+your personal account. `--visibility owner` is the default. Use `any` only if
+the App needs installations outside the owning account.
+
+The manifest requests Contents, Pull requests, and Issues `read` for an
+investigation-only identity, or `write` if implementation is allowed. It disables
+webhooks and user authorization. GitHub requires a human to install the new App
+and select the repositories. After registration, `setup` prints the App install
+URL, App ID, protected key path, and the commands to discover installations and
+associate the selected installation. For example:
+
+```sh
+paddock github installations --app-id 12345 --private-key-file /protected/path.pem
+paddock identity github associate mozzie --app-id 12345 \
+  --installation-id 67890 --private-key-file /protected/path.pem
+paddock identity verify mozzie --repo your-login/project
+paddock identity github repositories mozzie --json
+paddock identity show mozzie --json
+```
+
+Association verifies the App and installation with GitHub and derives the bot
+login and numeric bot user ID. New OpenShell worktrees set their Git author to
+`ID+login@users.noreply.github.com`, following [GitHub's noreply address format](https://docs.github.com/en/account-and-profile/reference/email-addresses-reference).
+The App installation token authenticates pushes and PR creation as that bot.
+`verify --repo` repeats the live authentication check, confirms the
+installation can read that repository, and asks GitHub to mint a scoped token
+for each profile the identity permits. It discards those tokens immediately.
+`github repositories` lists the
+installation's current repository access. Select the identity when
+starting a task; the repository route is only a default for commands that omit
+`--identity`:
+
+```sh
+paddock run --repo project --identity mozzie --profile implementation \
+  --json 'Implement the change'
+```
+
+To use an App that already exists, create the identity and run `associate` with
+its App ID, installation ID, and protected key file. Use `identity github rotate`
+with a new key; rotation requires the same App, installation, and bot actor.
+`identity github detach` clears
+the Paddock binding; `identity disable` blocks new tasks and token renewal.
+Revoking an App key or uninstalling the App itself is an action in GitHub's App
+settings. Existing installation tokens can remain valid until they expire; revoke
+them in GitHub when immediate cutoff is required. Inspect the selected App's
+permissions and repository list in GitHub after installation or repair.
+
+The registration sequence follows [GitHub's App Manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest).
+
+### Existing direct App configuration
 
 Each developer or team supplies its own App. Paddock has no central App registration
 or hosted credential service. The App's slug determines the GitHub bot username.
@@ -83,12 +156,13 @@ principal. Rotating a key for the same App and installation preserves pending re
 
 File-based setup imports an owner-only copy into the OS user config directory:
 
-- macOS: `~/Library/Application Support/paddock/credentials/github-app-APP_ID.pem`
-- Linux: `${XDG_CONFIG_HOME:-~/.config}/paddock/credentials/github-app-APP_ID.pem`
+- macOS: `~/Library/Application Support/paddock/credentials/github-app-APP_ID-IDENTITY.pem`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/paddock/credentials/github-app-APP_ID-IDENTITY.pem`
 
 The credentials directory has mode `0700`; key files have mode `0600`. Source files must
 be regular files with owner-only access, not symlinks. The original downloaded file remains
-in place. Keys are shared by App ID across profiles; repeat `auth` with a new key to rotate.
+in place. Named identities keep separate key copies even when they use the same App ID;
+repeat `auth` or use `identity github rotate` with a new key to rotate one identity.
 This uses protected files, not macOS Keychain. Windows currently supports environment PEM
 configuration; file import requires Unix permissions.
 
@@ -119,11 +193,11 @@ cache. See [GitHub's installation token flow](https://docs.github.com/en/apps/cr
 App PEM variables and installation tokens are removed from agent, terminal, Git, and
 agent-control subprocess environments. They are absent from task state and generated
 prompts. App-backed agent replies enter a local queue; the credentialed poller sends them.
-Host execution still shares OS permissions with other processes running as the same user:
-this prevents credential inheritance, but does not sandbox an agent that deliberately reads
-owner-readable files. Future sandbox execution can provide that stronger boundary.
+New agent execution takes place in OpenShell. The host broker retains App
+private keys and supplies only repository-scoped, short-lived installation
+tokens to App-backed task sandboxes.
 
-### Optional development fallback
+### Legacy `gh` profile for GitHub coordination
 
 ```sh
 paddock github auth --name dev --mode gh --login your-login
@@ -136,6 +210,8 @@ Named profiles do not create a default route. Omitting `--name` explicitly confi
 `default` and maps `'*'` to it for compatibility. Existing single-identity state migrates
 to that same mapping, preserving the original principal for pending replies. Old App
 profiles using `--token-env` must be reconfigured with an App ID, installation ID, and key.
+The `gh` profile cannot start an OpenShell agent task. Use an App-backed identity
+for GitHub work or an unbacked identity for local-only work.
 
 ## Watch a task's PR
 
@@ -169,6 +245,9 @@ list. Paddock's own App identity and Paddock-marked replies remain excluded to p
 loops. The wildcard must be used alone. Existing watches remain restricted until you
 update them; re-run `watch` with named user or bot accounts to narrow access.
 Status exposes this policy as `allow_any_user: true`.
+Legacy host task records report `unsupported` for comment delivery. Their
+comments stay pending because those agents cannot be restarted outside
+OpenShell.
 After upgrading, restart any running poller with the upgraded CLI's `github stop`
 and `github start` commands before registering wildcard watches. Registration
 refuses an older running poller rather than saving a policy it cannot enforce.
@@ -203,12 +282,10 @@ If the worktree was collected, it is reconstructed from Git with an explicit rec
 notice. Missing history, uncertain launches, or unavailable terminals keep comments pending.
 Tasks without a saved identity remain offline until explicitly resumed; no replacement
 conversation is created. An exited agent's already queued replies
-and delivery receipts can still be published. Native message routing currently supports
-Codex and Claude in both runtimes. After upgrading the CLI, restart the shared
-poller with `paddock github stop` followed by `paddock github start`. Host Claude
-sessions launched before inbox support must exit normally and be reopened with
-`paddock resume TASK_ID` to enable the inbox. Paddock leaves their comments pending
-until then; it never restarts a running agent or types into its terminal.
+and delivery receipts can still be published. Native message routing supports
+Codex and Claude in OpenShell. After upgrading the CLI, restart the shared
+poller with `paddock github stop` followed by `paddock github start`. Paddock
+never restarts a running agent or types into its terminal.
 
 `paddock github poll` processes once. `paddock github poll --interval 30s` runs in the
 foreground and takes the same singleton lease; it refuses to start if a poller is
@@ -290,14 +367,11 @@ the original coding action to be repeated.
 These are at-most-once action attempts, not a distributed exactly-once transaction.
 Deleted local state loses deduplication history; keep the registry on a local filesystem.
 
-## Optional model-backed routing
+## Routing
 
-Enable `paddock github routing PR_URL --mode planner --tasks TASK_ID --repos REPO_ALIAS`
-to let an ephemeral Codex planner inspect context and choose actions beyond the owning
-session. Scope is configured by the operator and does not come from comment text.
-Direct routing remains the default and shares the same signal executor and replay
-protection. See [orchestration](orchestration.md) for model/prompt configuration,
-context reads, action types, and recovery semantics.
+Watched PR comments use direct delivery to the owning task. Model-backed
+routing is unavailable until its planner runs in OpenShell. Existing watches
+configured for planner mode should be changed to `--mode direct` before polling.
 
 ### Submitted reviews
 

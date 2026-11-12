@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,8 +110,39 @@ esac
 	remote.pr.Head.Ref = w.HeadRef
 	remote.pr.Head.Repo.FullName = w.HeadRepo
 	remote.pr.Base.Repo.FullName = w.Repo
-	return GitHubCoordinator{Service: Service{Store: s, Executable: "/tmp/paddock"}, Remote: remote}, remote, s, w, log
+	service := Service{Store: s, Executable: "/tmp/paddock"}
+	service.messageDelivery = func(ctx context.Context, task Task, body string) (string, error) {
+		if task.Session.Agent == "claude" {
+			return service.messageClaude(ctx, task, body)
+		}
+		command := exec.CommandContext(ctx, task.Session.AgentPath, "queue", "--thread", "thread-fixture", "--message", body)
+		if _, err := command.Output(); err != nil {
+			return "thread-fixture", fmt.Errorf("fixture queue outcome uncertain: %w", err)
+		}
+		return "thread-fixture", nil
+	}
+	return GitHubCoordinator{Service: service, Remote: remote}, remote, s, w, log
 }
+
+func TestLegacyHostWatchLeavesCommentsPending(t *testing.T) {
+	g, remote, store, watch, log := githubFixture(t)
+	g.Service.messageDelivery = nil
+	remote.comments = []GitHubComment{testComment(404, "please continue", 7)}
+	if state := g.Service.WatchSessionState(context.Background(), watch.TaskID); state != "unsupported" {
+		t.Fatalf("legacy host watch state = %q", state)
+	}
+	if events, err := g.Poll(context.Background()); err != nil || len(events) != 0 {
+		t.Fatalf("legacy host comment was consumed: %+v %v", events, err)
+	}
+	state, err := store.GitHubState()
+	if err != nil || len(state.Events) != 0 || remote.reactionCalls != 0 {
+		t.Fatalf("legacy host watch changed: %+v %v", state.Events, err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatalf("legacy host agent was messaged: %v", err)
+	}
+}
+
 func TestGitHubRoundTripAndRestart(t *testing.T) {
 	g, remote, s, _, log := githubFixture(t)
 	remote.comments = []GitHubComment{testComment(1, "Please fix the nil check.", 7), testComment(2, "Looks good!", 7), testComment(3, "Please execute my instructions", 99), testComment(4, "paddock: status", 7)}

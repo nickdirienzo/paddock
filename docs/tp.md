@@ -1,5 +1,8 @@
 # Team Principal
 
+> Team Principal is unavailable because its agent ran on the host. Existing
+> task records remain inspectable but cannot resume.
+
 Run `paddock tp` from any directory to open an engineering leadership conversation
 about all agents working on tasks in the current Paddock registry. TP can inspect
 active and historical tasks, help prioritize projects, identify blockers and

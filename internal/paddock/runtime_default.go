@@ -24,15 +24,18 @@ func (s *Store) DefaultRuntime() (string, error) {
 	if err := json.Unmarshal(b, &config); err != nil {
 		return "", fmt.Errorf("invalid runtime.json: %w", err)
 	}
-	if config.Default != "host" && config.Default != "openshell" {
-		return "", fmt.Errorf("runtime default must be host or openshell")
+	if config.Default == "host" {
+		return "", fmt.Errorf("host agent runtime is unavailable; set the default to openshell")
+	}
+	if config.Default != "openshell" {
+		return "", fmt.Errorf("runtime default must be openshell")
 	}
 	return config.Default, nil
 }
 
 func (s *Store) SetDefaultRuntime(value string) error {
-	if value != "host" && value != "openshell" {
-		return fmt.Errorf("runtime default must be host or openshell")
+	if value != "openshell" {
+		return fmt.Errorf("runtime default must be openshell")
 	}
 	return s.withLock(func() error {
 		return writeJSONAtomic(filepath.Join(s.Home, "runtime.json"), map[string]string{"default": value})

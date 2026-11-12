@@ -1,14 +1,9 @@
 # OpenShell runtime
 
-New tasks default to OpenShell. `--runtime host` explicitly uses installed host
-agents and their existing authentication. Tasks created before this change remain
-host tasks; resume never migrates them. Missing sandbox setup fails with setup
-instructions, without falling back to host execution or a personal GitHub login.
-
-For an explicit local rollout choice, use `paddock runtime default host` while
-preparing the gateway, then `paddock runtime default openshell` to activate it.
-`paddock runtime default` prints the current choice. This affects new tasks only;
-an explicit `--runtime` flag wins, and resumes retain their saved runtime.
+All new agent tasks run in OpenShell. Explicit `--runtime host` and saved host
+defaults are rejected. Existing host tasks remain inspectable but cannot resume.
+Missing sandbox setup fails with setup instructions. `paddock runtime default`
+prints the current choice and accepts only `openshell`.
 
 ## Setup
 
@@ -29,16 +24,18 @@ docker image inspect paddock-agent:0.1.6 --format '{{.Id}}'
 The image contains pinned Codex and Claude versions, Git, gh, Go, and a small
 launcher. `paddock runtime configure --image` requires a digest reference or a local
 `sha256:` image ID. The supplied filesystem/network policy is a starting point for
-Go projects. A Mirage image/policy will also need the monorepo's tooling and
-explicit dependency endpoints. Configure RAM with room for both the build and
+Go projects. Other repositories may need their own tooling and explicit
+dependency endpoints. Configure RAM with room for both the build and
 agent; a 16 GB build needs more than a 16 GB total sandbox budget, and the OrbStack
 VM needs enough memory too.
 
-Configure the existing GitHub App identity/routes first. The App needs Contents,
-Pull requests, and Issues write permissions. Each task pins the mapped principal,
-gets a separate provider, and mints tokens restricted to exactly its repository and
-those permissions. Workflow-file changes require a separate permissions decision;
-this runtime does not request Actions/workflows administration.
+For GitHub work, configure an App identity and repository route first. The App
+needs Contents, Pull requests, and Issues write permissions. Each App-backed
+task pins the mapped principal, gets a separate provider, and mints tokens
+restricted to exactly its repository and those permissions. An unbacked logical
+identity can run local-only tasks without a GitHub origin or token. Workflow-file
+changes require a separate permissions decision; this runtime does not request
+Actions/workflows administration.
 
 Model authentication is separate from the GitHub identity. Paddock accepts an
 explicit OpenShell provider for each agent; it does not discover personal model
@@ -102,6 +99,20 @@ so changing the globally selected OpenShell gateway cannot redirect an existing 
 `runtime check` verifies the qualified CLI and gateway connectivity; task creation
 additionally validates the provider profile, credentials, image, and agent binary.
 
+Investigation tasks seed their private Git checkout before agent startup, then
+launch the agent and its native daemon under a second Landlock layer. Source
+file contents and the private Git database reject agent writes; its home, `/tmp`,
+Go cache, and Go module cache remain writable. The trusted sandbox launcher is
+non-dumpable so an agent running under the same Unix UID cannot inspect its
+memory. Preparation probes that the worktree rejects writes and scratch accepts
+them; failure stops launch. An older investigation task without this verified
+guard cannot resume or receive a follow-up; create a new task. The OpenShell
+startup policy still limits the entire sandbox's host and network access.
+Linux Landlock does not restrict metadata operations such as `chmod`; a live
+probe could change the mode of a temporary worktree file. Investigation tasks
+cannot push with their read-only GitHub token, but strict worktree metadata
+immutability still needs a separate ownership or staging design.
+
 ## Pasted images
 
 Paste screenshots into a sandboxed Codex or Claude terminal normally. Paddock
@@ -125,50 +136,11 @@ size changes, control keys, native permissions, and the agent's exit status.
 
 ### Trusted MCP connections
 
-Grant a repository access to named HTTPS MCP servers already configured and
-authenticated in host Codex:
-
-```sh
-paddock repo trust mirage --mcp observe,metabase
-```
-
-Use an alias or repository path. This also grants project trust. MCP grants are
-additive and shared by linked worktrees and delegated tasks of the same repository.
-Ordinary `repo trust` does not grant access to any host MCPs.
-
-On the next OpenShell agent launch, including a cold resume, Paddock installs
-only the selected connections into sandbox Codex and Claude. A supervisor-owned
-stdio bridge uses a dedicated host Codex app-server connection for MCP discovery,
-tool calls, and resource reads. Host Codex must be installed (qualified with
-0.159.2); the source is `$CODEX_HOME/config.toml`, or `~/.codex/config.toml`.
-Existing host MCP OAuth login and refresh remain native to Codex. Log in on the
-host with `codex mcp login NAME` if required.
-
-Credentials stay on the host, and MCP requests use the host's network connection.
-For example, Metabase on a Tailscale hostname works when the host can reach it;
-the sandbox does not need its own Tailscale client or additional outbound rules.
-This is an explicit grant to use every tool enabled for the selected server,
-including writes. Configure `enabled_tools` or `disabled_tools` in host Codex to
-narrow that access before granting trust. The bridge exposes no app-server,
-shell, process, model-turn, or arbitrary URL operation. Host stdio MCP commands
-and plugin-provided servers are not imported. Native agent tool approvals still
-apply; host approval/elicitation requests are refused by the bridge.
-
-Paddock saves the source home, endpoint, and configuration fingerprint, without
-credential values. Changing a trusted server's definition requires reviewing it
-and granting trust again. MCP grant changes do not edit the host Codex config.
-
-```sh
-# Revoke just one connection, retaining project trust and other MCP grants:
-paddock repo untrust mirage --mcp metabase
-# Revoke project trust and all of its MCP grants:
-paddock repo untrust mirage
-```
-
-Revocation blocks new bridge requests immediately; it does not cancel requests
-already sent to a service. Adding or re-granting a connection requires exiting
-the agent and resuming the task to reload its MCP catalog. An unavailable bridge
-fails closed and never falls back to exporting host credentials.
+Host MCP forwarding is unavailable because agent tool execution must remain
+inside OpenShell. Existing grants can be removed with `paddock repo untrust
+PROJECT --mcp NAME`. Tasks with remaining host MCP grants fail before agent
+launch. Configure MCP servers directly inside the OpenShell environment and
+its network policy for new work.
 
 Normal `git` and `gh` commands run inside OpenShell as the mapped App bot. Tokens
 are not shared with the installation-wide poller transport. The host retains App
@@ -192,7 +164,7 @@ Without this option, register a watch explicitly
 from the host. Sandboxed agents use ordinary `gh` for PRs/replies; the host owns task
 coordination. `paddock message TASK 'instructions'` uses the agent's native inbox inside
 the sandbox, resuming the saved conversation when needed. Claude support is pinned
-to 2.1.286 and also works on macOS and Linux host tasks. Paddock verifies the inbox's
+to 2.1.286. Paddock verifies the inbox's
 process, conversation, and launch generation, then requires an exact persisted
 `queue-operation: enqueue` record before acknowledging delivery. A socket write
 alone is insufficient. Claude treats these as peer messages: its hold/refuse rules
@@ -209,8 +181,8 @@ is copied. Build state remains in the task's retained container filesystem.
 
 Codex uses `--sandbox danger-full-access --ask-for-approval on-request` **inside
 OpenShell**, where the outer runtime enforces isolation. This avoids unsupported
-nested Bubblewrap namespaces while keeping native approvals enabled. Host tasks
-retain their original sandbox/approval settings. Hook approval is not bypassed.
+nested Bubblewrap namespaces while keeping native approvals enabled. Hook
+approval is not bypassed.
 The pinned Codex version needs its saved thread loaded through `thread/resume`
 on the native daemon before the remote TUI attaches. The launcher verifies the
 outer-runtime policy was accepted; it refuses active/approval states. This avoids

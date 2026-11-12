@@ -39,8 +39,11 @@ type OpenShellTask struct {
 	Provider            string                `json:"provider"`
 	Repository          string                `json:"repository"`
 	Identity            GitHubIdentityBinding `json:"identity"`
+	GitAuthorName       string                `json:"git_author_name,omitempty"`
+	GitAuthorEmail      string                `json:"git_author_email,omitempty"`
 	CredentialExpiresAt time.Time             `json:"credential_expires_at,omitempty"`
 	CredentialError     string                `json:"credential_error,omitempty"`
+	ReadOnlyGuard       bool                  `json:"read_only_guard,omitempty"`
 	Ready               bool                  `json:"ready"`
 }
 
@@ -54,7 +57,7 @@ func (s *Store) OpenShellConfig() (OpenShellConfig, error) {
 	var c OpenShellConfig
 	b, e := os.ReadFile(filepath.Join(s.Home, "openshell.json"))
 	if errors.Is(e, os.ErrNotExist) {
-		return c, fmt.Errorf("OpenShell is the default runtime; configure it with paddock runtime configure (see paddock runtime --help), or explicitly use --runtime host")
+		return c, fmt.Errorf("OpenShell is required; configure it with paddock runtime configure (see paddock runtime --help)")
 	}
 	if e != nil {
 		return c, e
@@ -199,24 +202,40 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 	if e = s.CheckOpenShell(ctx); e != nil {
 		return t, e
 	}
-	raw, e := git(ctx, repo.Root, "remote", "get-url", "origin")
-	if e != nil {
-		return t, e
-	}
-	remote, e := githubRepositoryURL(raw)
-	if e != nil {
-		return t, e
+	raw, remoteErr := git(ctx, repo.Root, "remote", "get-url", "origin")
+	remote := ""
+	if remoteErr == nil {
+		remote, remoteErr = githubRepositoryURL(raw)
 	}
 	state, e := s.Store.GitHubState()
 	if e != nil {
 		return t, e
 	}
-	binding, identity, e := state.ResolveGitHubIdentity(remote)
+	var binding GitHubIdentityBinding
+	var identity GitHubIdentity
+	if o.Identity != "" {
+		identity, e = state.IdentityForCaller(o.Identity, o.Profile, o.provenance.Caller)
+		if e == nil {
+			binding = bindGitHubIdentity(o.Identity, identity)
+		}
+	} else {
+		if remoteErr != nil {
+			return t, fmt.Errorf("a repository route requires a GitHub origin: %w", remoteErr)
+		}
+		binding, identity, e = state.ResolveGitHubIdentity(remote)
+		if e == nil {
+			_, e = state.IdentityForCaller(binding.Name, o.Profile, o.provenance.Caller)
+		}
+	}
 	if e != nil {
 		return t, e
 	}
-	if identity.Mode != "app" || identity.App == nil {
-		return t, fmt.Errorf("OpenShell requires a GitHub App identity for %s", remote)
+	githubApp := identity.Mode == "app" && identity.App != nil
+	if identity.Mode != "" && !githubApp {
+		return t, fmt.Errorf("identity %q has no usable OpenShell GitHub App; detach legacy GitHub credentials to run local-only", binding.Name)
+	}
+	if githubApp && remoteErr != nil {
+		return t, fmt.Errorf("GitHub App identity requires a GitHub origin: %w", remoteErr)
 	}
 	_, session, e := SelectTerminal(ctx, o.Backend)
 	if e != nil {
@@ -246,7 +265,23 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 		return t, e
 	}
 	session.TrustProject = trusted && o.Agent == "codex"
-	t = Task{ID: id, Runtime: "openshell", OpenShell: &OpenShellTask{Config: c, Name: name, Provider: "paddock-" + id, Repository: remote, Identity: binding}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
+	o.provenance.Identity = binding.Name
+	o.provenance.Capabilities = executionCapabilities(o.Profile, githubApp)
+	author, mail, provider := binding.Name, binding.Name+"@paddock.invalid", ""
+	if githubApp {
+		o.provenance.GitHubActor = binding.Login
+		botID := identity.BotUserID
+		if botID == 0 {
+			botID, e = NewGitHubAPI(identity).BotUserID(ctx, binding.Login)
+			if e != nil {
+				return t, fmt.Errorf("verify GitHub bot commit actor: %w", e)
+			}
+		}
+		author, mail, provider = binding.Login, fmt.Sprintf("%d+%s@users.noreply.github.com", botID, binding.Login), "paddock-"+id
+	} else {
+		remote = ""
+	}
+	t = Task{ID: id, Runtime: "openshell", Provenance: o.provenance, OpenShell: &OpenShellTask{Config: c, Name: name, Provider: provider, Repository: remote, Identity: binding, GitAuthorEmail: mail, GitAuthorName: author}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
 	t.OpenShell.AgentProxy, e = sandboxAgentProxy(s.Store.Home, c.Binary, o.Agent)
 	if e != nil {
 		return t, e
@@ -254,6 +289,11 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 	if e = s.Store.Insert(t); e != nil {
 		return t, e
 	}
+	releasePreparation, e := s.Store.taskLease(id, "prepare")
+	if e != nil {
+		return t, e
+	}
+	defer releasePreparation()
 	fail := func(err error) (Task, error) {
 		_ = s.Store.Status(id, "failed", err.Error(), "preparing", "starting")
 		current, _ := s.Store.Get(id)
@@ -273,20 +313,36 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 }
 
 func githubProfile(repo, id string) map[string]any {
+	return githubProfileForExecution(repo, id, "implementation")
+}
+
+func githubProfileForExecution(repo, id, profile string) map[string]any {
 	rule := func(method, path string) any {
 		return map[string]any{"allow": map[string]string{"method": method, "path": path}}
+	}
+	apiRules := []any{rule("GET", "/repos/"+repo), rule("GET", "/repos/"+repo+"/**"), rule("GET", "/installation/repositories")}
+	gitRules := []any{rule("GET", "/"+repo+".git/**"), rule("POST", "/"+repo+".git/git-upload-pack")}
+	graphqlAccess := "read-only"
+	if profile == "implementation" {
+		apiRules = append(apiRules, rule("POST", "/repos/"+repo+"/**"), rule("PATCH", "/repos/"+repo+"/**"), rule("DELETE", "/repos/"+repo+"/git/refs/**"))
+		gitRules = append(gitRules, rule("POST", "/"+repo+".git/git-receive-pack"))
+		graphqlAccess = "read-write"
 	}
 	return map[string]any{"id": id, "display_name": "Paddock task GitHub identity", "category": "source_control",
 		"credentials": []any{map[string]any{"name": "api_token", "env_vars": []string{"GH_TOKEN", "GITHUB_TOKEN"}, "required": true, "stable_placeholder": true, "auth_style": "bearer", "header_name": "authorization"}},
 		"endpoints": []any{
-			map[string]any{"host": "api.github.com", "port": 443, "protocol": "rest", "enforcement": "enforce", "rules": []any{rule("GET", "/repos/"+repo), rule("GET", "/repos/"+repo+"/**"), rule("POST", "/repos/"+repo+"/**"), rule("PATCH", "/repos/"+repo+"/**"), rule("DELETE", "/repos/"+repo+"/git/refs/**"), rule("GET", "/installation/repositories")}},
-			map[string]any{"host": "api.github.com", "port": 443, "path": "/graphql", "protocol": "graphql", "access": "read-write", "enforcement": "enforce"},
-			map[string]any{"host": "github.com", "port": 443, "path": "/" + repo + ".git/**", "protocol": "rest", "enforcement": "enforce", "rules": []any{rule("GET", "/"+repo+".git/**"), rule("POST", "/"+repo+".git/git-upload-pack"), rule("POST", "/"+repo+".git/git-receive-pack")}}},
+			map[string]any{"host": "api.github.com", "port": 443, "protocol": "rest", "enforcement": "enforce", "rules": apiRules},
+			map[string]any{"host": "api.github.com", "port": 443, "path": "/graphql", "protocol": "graphql", "access": graphqlAccess, "enforcement": "enforce"},
+			map[string]any{"host": "github.com", "port": 443, "path": "/" + repo + ".git/**", "protocol": "rest", "enforcement": "enforce", "rules": gitRules}},
 		"binaries": []string{"/usr/bin/git", "/usr/bin/gh"}}
 }
 
 // Fresh tokens are never shared with the poller's broad installation transport.
 func (a *githubAppAuth) repositoryToken(ctx context.Context, repo string) (string, time.Time, error) {
+	return a.repositoryTokenForExecution(ctx, repo, "implementation")
+}
+
+func (a *githubAppAuth) repositoryTokenForExecution(ctx context.Context, repo, profile string) (string, time.Time, error) {
 	if !githubRepoName.MatchString(repo) {
 		return "", time.Time{}, fmt.Errorf("invalid token repository")
 	}
@@ -303,6 +359,9 @@ func (a *githubAppAuth) repositoryToken(ctx context.Context, repo string) (strin
 		Permissions map[string]string `json:"permissions"`
 	}
 	permissions := map[string]string{"contents": "write", "pull_requests": "write", "issues": "write"}
+	if profile == "investigation" {
+		permissions = map[string]string{"contents": "read", "pull_requests": "read", "issues": "read"}
+	}
 	_, name, _ := strings.Cut(repo, "/")
 	_, e = a.http(ctx, "POST", fmt.Sprintf("app/installations/%d/access_tokens", a.config.InstallationID), jwt, map[string]any{"repositories": []string{name}, "permissions": permissions}, &result)
 	if e != nil {
@@ -327,6 +386,9 @@ func (a *githubAppAuth) repositoryToken(ctx context.Context, repo string) (strin
 	return result.Token, result.ExpiresAt, nil
 }
 func (s Service) sandboxToken(ctx context.Context, t Task) (string, time.Time, error) {
+	if t.OpenShell == nil || t.OpenShell.Provider == "" {
+		return "", time.Time{}, fmt.Errorf("task has no GitHub credential provider")
+	}
 	state, e := s.Store.GitHubState()
 	if e != nil {
 		return "", time.Time{}, e
@@ -338,7 +400,7 @@ func (s Service) sandboxToken(ctx context.Context, t Task) (string, time.Time, e
 	if i.App == nil {
 		return "", time.Time{}, fmt.Errorf("task identity no longer has an App")
 	}
-	return newGitHubAppAuth(*i.App).repositoryToken(ctx, t.OpenShell.Repository)
+	return newGitHubAppAuth(*i.App).repositoryTokenForExecution(ctx, t.OpenShell.Repository, t.Provenance.Profile)
 }
 func (s Service) updateSandboxCredential(ctx context.Context, t *Task, create bool) error {
 	release, err := s.Store.taskLease(t.ID, "credentials")
@@ -377,22 +439,28 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 		return e
 	}
 	defer os.RemoveAll(dir)
-	profile := filepath.Join(dir, "github.json")
-	if e = writeJSONAtomic(profile, githubProfile(t.OpenShell.Repository, t.OpenShell.Provider)); e != nil {
-		return e
-	}
-	if _, e = c.call(ctx, "profile", "lint", "--file", profile); e != nil {
-		return e
-	}
-	if _, e = c.call(ctx, "profile", "import", "--file", profile); e != nil {
-		return e
-	}
-	if e = s.updateSandboxCredential(ctx, t, true); e != nil {
-		return e
+	if t.OpenShell.Provider != "" {
+		profile := filepath.Join(dir, "github.json")
+		if e = writeJSONAtomic(profile, githubProfileForExecution(t.OpenShell.Repository, t.OpenShell.Provider, t.Provenance.Profile)); e != nil {
+			return e
+		}
+		if _, e = c.call(ctx, "profile", "lint", "--file", profile); e != nil {
+			return e
+		}
+		if _, e = c.call(ctx, "profile", "import", "--file", profile); e != nil {
+			return e
+		}
+		if e = s.updateSandboxCredential(ctx, t, true); e != nil {
+			return e
+		}
 	}
 	// Retain the workload layer on stop. No host bind mounts, Git credential
 	// helpers, personal home, Docker socket, or gateway credentials enter it.
-	args := []string{"sandbox", "create", "--name", t.OpenShell.Name, "--from", c.Image, "--policy", c.Policy, "--provider", t.OpenShell.Provider, "--provider", c.Providers[t.Session.Agent], "--no-auto-providers", "--detach", "--no-tty", "--label", "paddock.task=" + t.ID, "--output", "json"}
+	args := []string{"sandbox", "create", "--name", t.OpenShell.Name, "--from", c.Image, "--policy", c.Policy}
+	if t.OpenShell.Provider != "" {
+		args = append(args, "--provider", t.OpenShell.Provider)
+	}
+	args = append(args, "--provider", c.Providers[t.Session.Agent], "--no-auto-providers", "--approval-mode", "manual", "--detach", "--no-tty", "--label", "paddock.task="+t.ID, "--output", "json")
 	if c.Memory != "" {
 		args = append(args, "--memory", c.Memory)
 	}
@@ -411,6 +479,12 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 	t.OpenShell.ID = state.ID
 	if e = s.Store.update(t.ID, func(v *Task) error { v.OpenShell = t.OpenShell; return nil }); e != nil {
 		return e
+	}
+	// Enable the sandbox-local advisor before the coding agent starts. Denied
+	// requests can then become narrow proposals and wait for the host operator
+	// instead of being mistaken for a failed experiment.
+	if _, e = c.call(ctx, "settings", "set", t.OpenShell.Name, "--key", "agent_policy_proposals_enabled", "--value", "true"); e != nil {
+		return fmt.Errorf("enable OpenShell policy advisor: %w", e)
 	}
 	// Use a private temporary Git database to bundle exactly the selected commit
 	// and its ancestry, including local unpushed bases; copy no Git configuration.
@@ -433,16 +507,24 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 	script := `set -eu
 umask 077
 git -c core.hooksPath=/dev/null clone --bare /sandbox/seed.bundle /sandbox/repository.git
-git --git-dir=/sandbox/repository.git remote set-url origin "$1"
-git --git-dir=/sandbox/repository.git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+if [ -n "$1" ]; then
+  git --git-dir=/sandbox/repository.git remote set-url origin "$1"
+  git --git-dir=/sandbox/repository.git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  gh auth setup-git
+else
+  git --git-dir=/sandbox/repository.git remote remove origin
+fi
 git --git-dir=/sandbox/repository.git config user.name "$3"
-git --git-dir=/sandbox/repository.git config user.email "$3@users.noreply.github.com"
+git --git-dir=/sandbox/repository.git config user.email "$4"
 git --git-dir=/sandbox/repository.git -c core.hooksPath=/dev/null worktree add -b "$2" /sandbox/worktree refs/heads/seed
-gh auth setup-git
 rm /sandbox/seed.bundle
 mkdir -p /home/sandbox/.codex /home/sandbox/.claude
 `
-	if _, e = sandboxOutput(ctx, bootstrap, "/bin/sh", "-c", script, "paddock", "https://github.com/"+t.OpenShell.Repository+".git", t.Branch, t.OpenShell.Identity.Login); e != nil {
+	remoteURL := ""
+	if t.OpenShell.Provider != "" {
+		remoteURL = "https://github.com/" + t.OpenShell.Repository + ".git"
+	}
+	if _, e = sandboxOutput(ctx, bootstrap, "/bin/sh", "-c", script, "paddock", remoteURL, t.Branch, t.OpenShell.GitAuthorName, t.OpenShell.GitAuthorEmail); e != nil {
 		return e
 	}
 	if _, e = sandboxOutput(ctx, *t, t.Session.AgentPath, "--version"); e != nil {
@@ -451,6 +533,10 @@ mkdir -p /home/sandbox/.codex /home/sandbox/.claude
 	if e = installHostShellShortcut(ctx, *t); e != nil {
 		return fmt.Errorf("install host shell shortcut: %w", e)
 	}
+	if e = installInvestigationGuard(ctx, *t, dir); e != nil {
+		return e
+	}
+	t.OpenShell.ReadOnlyGuard = t.Provenance.Profile == "investigation"
 	t.OpenShell.Ready = true
 	return nil
 }
@@ -464,7 +550,7 @@ func (s Service) RefreshSandboxCredentials(ctx context.Context) error {
 	}
 	var errs []error
 	for _, t := range tasks {
-		if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready {
+		if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready || t.OpenShell.Provider == "" {
 			continue
 		}
 		if time.Until(t.OpenShell.CredentialExpiresAt) > 10*time.Minute {
@@ -549,8 +635,10 @@ func (s Service) startTaskSandbox(ctx context.Context, t *Task) error {
 f=open('/sandbox/agent.lock','a'); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)`); e != nil {
 		return fmt.Errorf("sandbox agent may still be active; refusing a second launch")
 	}
-	if e = s.updateSandboxCredential(ctx, t, false); e != nil {
-		return e
+	if t.OpenShell.Provider != "" {
+		if e = s.updateSandboxCredential(ctx, t, false); e != nil {
+			return e
+		}
 	}
 	if e = s.Store.update(t.ID, func(v *Task) error {
 		v.OpenShell.CredentialExpiresAt = t.OpenShell.CredentialExpiresAt

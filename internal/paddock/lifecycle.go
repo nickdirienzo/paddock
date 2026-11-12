@@ -97,6 +97,25 @@ func (s *Store) taskLease(id, kind string) (func(), error) {
 	return func() { unlock(f); f.Close() }, nil
 }
 
+func (s *Store) preparationActive(id string) (bool, error) {
+	if !validID(id) {
+		return false, fmt.Errorf("invalid task ID")
+	}
+	f, err := os.OpenFile(filepath.Join(s.Home, "tasks", id+".prepare.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	available, err := tryLock(f)
+	if err != nil {
+		return false, err
+	}
+	if available {
+		unlock(f)
+	}
+	return !available, nil
+}
+
 func (s *Store) TouchActivity(id string) error {
 	return s.update(id, func(t *Task) error { t.LastActivityAt = now(); return nil })
 }
@@ -106,6 +125,12 @@ func (s Service) Resume(ctx context.Context, id string) (Task, error) {
 	if err != nil {
 		return t, err
 	}
+	if t.RuntimeName() != "openshell" {
+		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
+	}
+	if t.Provenance.Profile == "investigation" && (t.OpenShell == nil || !t.OpenShell.ReadOnlyGuard) {
+		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
+	}
 	release, err := s.Store.taskLease(t.ID, "operation")
 	if err != nil {
 		return t, err
@@ -114,21 +139,27 @@ func (s Service) Resume(ctx context.Context, id string) (Task, error) {
 	return s.resumeLocked(ctx, t.ID)
 }
 
-// This specific persisted error is emitted only when the MCP bridge fails
-// before AgentCommand runs. Missing history alone never permits replaying an
-// assignment: existing or previously resumed conversations still require their
-// native identity, even when their latest supervisor failed during MCP setup.
+// These persisted errors are emitted only before AgentCommand runs. Missing
+// history alone never permits replaying an assignment: existing or previously
+// resumed conversations still require their native identity.
 func canRetryInitialMCPStartup(t Task) bool {
 	return t.RuntimeName() == "openshell" && t.Status == "failed" &&
 		t.Session.Generation > 0 && !t.Session.Resume && t.Session.ConversationID == "" &&
 		t.Session.ExitCode != nil && *t.Session.ExitCode == 1 &&
-		strings.HasPrefix(t.Error, "trusted MCP bridge requires host Codex:")
+		(strings.HasPrefix(t.Error, "trusted MCP bridge requires host Codex:") ||
+			t.Error == "trusted host MCP tools are unavailable; LLM tool execution requires OpenShell")
 }
 
 func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	t, err := s.Store.Get(id)
 	if err != nil {
 		return t, err
+	}
+	if t.RuntimeName() != "openshell" {
+		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
+	}
+	if t.Provenance.Profile == "investigation" && (t.OpenShell == nil || !t.OpenShell.ReadOnlyGuard) {
+		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
 	}
 	t, obs, err := s.Refresh(ctx, t)
 	if err != nil {

@@ -21,14 +21,14 @@ func TestRuntimeDefaultIsExplicitAndPersistent(t *testing.T) {
 		}
 	}
 	read("openshell")
-	if err := runRuntime([]string{"default", "host"}, io.Discard); err != nil {
-		t.Fatal(err)
+	if err := runRuntime([]string{"default", "host"}, io.Discard); err == nil {
+		t.Fatal("accepted host runtime")
 	}
-	read("host")
+	read("openshell")
 	if err := runRuntime([]string{"default", "typo"}, io.Discard); err == nil {
 		t.Fatal("invalid preference accepted")
 	}
-	read("host")
+	read("openshell")
 	if err := runRuntime([]string{"default", "openshell"}, io.Discard); err != nil {
 		t.Fatal(err)
 	}

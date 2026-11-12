@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +31,12 @@ func OpenStore(home string) (*Store, error) {
 		return nil, err
 	}
 	if err = os.MkdirAll(filepath.Join(home, "tasks"), 0700); err != nil {
+		return nil, err
+	}
+	if err = os.MkdirAll(filepath.Join(home, "access"), 0700); err != nil {
+		return nil, err
+	}
+	if err = os.MkdirAll(filepath.Join(home, "messages"), 0700); err != nil {
 		return nil, err
 	}
 	f, err := os.OpenFile(filepath.Join(home, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -130,6 +138,24 @@ func (s *Store) Insert(t Task) error {
 		if _, err := os.Stat(s.path(t.ID)); !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("task already exists or cannot be accessed: %s", t.ID)
 		}
+		if t.Provenance.ExternalID != "" {
+			entries, err := os.ReadDir(filepath.Join(s.Home, "tasks"))
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+					continue
+				}
+				prior, err := s.read(strings.TrimSuffix(entry.Name(), ".json"))
+				if err != nil {
+					return err
+				}
+				if prior.Provenance.Caller == t.Provenance.Caller && prior.Provenance.RequesterSource == t.Provenance.RequesterSource && prior.Provenance.ExternalID == t.Provenance.ExternalID {
+					return fmt.Errorf("external ID already belongs to task %s", prior.ID)
+				}
+			}
+		}
 		if t.ParentID != "" {
 			if _, err := s.read(t.ParentID); err != nil {
 				return fmt.Errorf("parent task: %w", err)
@@ -137,6 +163,25 @@ func (s *Store) Insert(t Task) error {
 		}
 		return s.write(t)
 	})
+}
+
+// FindExternal lets a restarted deterministic caller reconcile an earlier
+// dispatch. The key is scoped to the authenticated local caller and source.
+func (s *Store) FindExternal(caller, source, externalID string) (Task, bool, error) {
+	if externalID == "" {
+		return Task{}, false, fmt.Errorf("external ID is required")
+	}
+	tasks, err := s.List("")
+	if err != nil {
+		return Task{}, false, err
+	}
+	for _, t := range tasks {
+		p := t.Provenance
+		if p.Caller == caller && p.RequesterSource == source && p.ExternalID == externalID {
+			return t, true, nil
+		}
+	}
+	return Task{}, false, nil
 }
 func (s *Store) get(prefix string) (Task, error) {
 	if prefix == "" {
@@ -201,8 +246,13 @@ func (s *Store) update(id string, fn func(*Task) error) error {
 		if err != nil {
 			return err
 		}
+		provenance := t.Provenance
+		provenance.Context = maps.Clone(t.Provenance.Context)
 		if err = fn(&t); err != nil {
 			return err
+		}
+		if !reflect.DeepEqual(t.Provenance, provenance) {
+			return fmt.Errorf("task provenance is immutable")
 		}
 		t.UpdatedAt = now()
 		return s.write(t)

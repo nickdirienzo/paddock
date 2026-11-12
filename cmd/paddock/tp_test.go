@@ -9,7 +9,7 @@ import (
 func TestTPHelpAndInvalidArgumentsNeedNoRegistry(t *testing.T) {
 	t.Setenv("PADDOCK_HOME", "/this/path/must/not/be/created")
 	var out bytes.Buffer
-	if err := run([]string{"tp", "--help"}, &out); err != nil || !strings.Contains(out.String(), "Team Principal") {
+	if err := run([]string{"tp", "--help"}, &out); err == nil || !strings.Contains(err.Error(), "unknown command") {
 		t.Fatal(out.String(), err)
 	}
 	for _, args := range [][]string{{"tp", "unexpected"}, {"tp", "--runtime", "host"}, {"tp", "--agent"}} {

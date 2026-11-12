@@ -291,6 +291,9 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(set.names) != 0 {
+		return nil, fmt.Errorf("trusted host MCP tools are unavailable; LLM tool execution requires OpenShell")
+	}
 	setup, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 	err = installTrustedMCPs(setup, task, set.names)
 	cancelSetup()

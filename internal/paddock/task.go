@@ -10,6 +10,7 @@ import (
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
 type Task struct {
+	Provenance         TaskProvenance `json:"provenance,omitzero"`
 	Role               string         `json:"role,omitempty"`
 	Runtime            string         `json:"runtime,omitempty"` // empty on legacy host tasks
 	OpenShell          *OpenShellTask `json:"openshell,omitempty"`
@@ -32,6 +33,20 @@ type Task struct {
 	WorkspaceCommit    string         `json:"workspace_commit,omitempty"`
 	WorkspaceRemovedAt string         `json:"workspace_removed_at,omitempty"`
 	Session            Session        `json:"session"`
+}
+
+// TaskProvenance is fixed when the trusted host creates a task. Requester and
+// context are assertions from the caller, never authentication evidence.
+type TaskProvenance struct {
+	Caller          string            `json:"caller,omitempty"`
+	Requester       string            `json:"requester,omitempty"`
+	RequesterSource string            `json:"requester_source,omitempty"`
+	ExternalID      string            `json:"external_id,omitempty"`
+	Context         map[string]string `json:"context,omitempty"`
+	Identity        string            `json:"identity,omitempty"`
+	GitHubActor     string            `json:"github_actor,omitempty"`
+	Profile         string            `json:"profile,omitempty"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
 }
 
 type Session struct {
@@ -61,10 +76,21 @@ type Observation struct {
 	Error string `json:"error,omitempty"`
 }
 
+// AgentTurn describes the last native model turn, independently of the
+// interactive terminal's lifetime. A read failure is unknown, not completion.
+type AgentTurn struct {
+	ID    string `json:"id,omitempty"`
+	State string `json:"state"` // none, inProgress, completed, failed, interrupted, unknown
+	Error string `json:"error,omitempty"`
+}
+
 type Detail struct {
 	Task
-	Terminal Observation `json:"terminal"`
-	Children []Task      `json:"children"`
+	Terminal       Observation     `json:"terminal"`
+	LastTurn       *AgentTurn      `json:"last_turn,omitempty"`
+	Children       []Task          `json:"children"`
+	AccessRequests []AccessRequest `json:"access_requests,omitempty"`
+	Blocked        bool            `json:"blocked"`
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

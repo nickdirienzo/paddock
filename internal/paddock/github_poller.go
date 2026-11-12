@@ -265,7 +265,30 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 			}
 		}
 	}()
-	defer func() { cancel(); <-stopped; <-renewed }()
+	accessed := make(chan struct{})
+	go func() {
+		defer close(accessed)
+		ticker := time.NewTicker(accessPollInterval)
+		defer ticker.Stop()
+		lastError := ""
+		for {
+			err := g.Service.SyncRunningAccess(ctx)
+			message := ""
+			if err != nil {
+				message = err.Error()
+			}
+			if message != "" && message != lastError {
+				fmt.Fprintln(os.Stderr, "OpenShell access request sync:", message)
+			}
+			lastError = message
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	defer func() { cancel(); <-stopped; <-renewed; <-accessed }()
 	for ctx.Err() == nil {
 		// Bound a pass so a stalled API cannot prevent later polls forever.
 		pollCtx, pollCancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -303,6 +326,9 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 	task, err := s.Store.Get(id)
 	if err != nil {
 		return "missing"
+	}
+	if task.RuntimeName() != "openshell" && s.messageDelivery == nil {
+		return "unsupported"
 	}
 	if !nativeMessageSupported(task) {
 		return "unsupported"

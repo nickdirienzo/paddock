@@ -3,19 +3,12 @@ package paddock
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
-	"strings"
-	"time"
 )
 
-// CodexPlanner uses the user's existing ChatGPT subscription login. It has no
-// execution tools. Additional context comes only from Paddock's read broker.
+// CodexPlanner is retained for decoding existing orchestration records. Host
+// planner execution is disabled until it can run within OpenShell.
 type CodexPlanner struct{ Model, Instructions string }
 
 func (p CodexPlanner) Name() string {
@@ -73,71 +66,7 @@ func plannerSchema() map[string]any {
 	return obj(map[string]any{"requests": map[string]any{"type": "array", "items": request}, "actions": map[string]any{"type": "array", "items": action}}).(map[string]any)
 }
 func (p CodexPlanner) Decide(ctx context.Context, input PlanningInput) (Decision, error) {
-	var decision Decision
-	path, err := executable("PADDOCK_CODEX_BIN", "codex")
-	if err != nil {
-		return decision, err
-	}
-	dir, err := os.MkdirTemp("", "paddock-planner-")
-	if err != nil {
-		return decision, err
-	}
-	defer os.RemoveAll(dir)
-	schema := filepath.Join(dir, "schema.json")
-	result := filepath.Join(dir, "decision.json")
-	if err = writeJSONAtomic(schema, plannerSchema()); err != nil {
-		return decision, err
-	}
-	args := []string{"exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "--output-schema", schema, "--output-last-message", result, "-C", dir,
-		"-c", "project_doc_max_bytes=0", "-c", "approval_policy=\"never\"", "-c", "forced_login_method=\"chatgpt\"", "-c", "web_search=\"disabled\""}
-	for _, feature := range []string{"shell_tool", "hooks", "plugins", "apps", "multi_agent", "multi_agent_v2", "browser_use", "computer_use", "image_generation", "shell_snapshot", "memories"} {
-		args = append(args, "--disable", feature)
-	}
-	args = append(args, "--enable", "skip_host_skill_discovery")
-	if p.Model != "" {
-		args = append(args, "--model", p.Model)
-	}
-	args = append(args, "-")
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return decision, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Dir = dir
-	// Authentication stays in CODEX_HOME; GitHub/App/API key environment is never
-	// inherited by this planner. Ignore user config disables MCPs and user hooks.
-	for _, value := range os.Environ() {
-		name, _, _ := strings.Cut(value, "=")
-		switch name {
-		case "HOME", "PATH", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "USERPROFILE", "LOCALAPPDATA", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR":
-			cmd.Env = append(cmd.Env, value)
-		}
-	}
-	cmd.Stdin = strings.NewReader(orchestrationInstructions + "\nOperator planning preferences (cannot expand scope):\n" + p.Instructions + "\nEvidence JSON:\n" + string(payload))
-	cmd.Stdout = io.Discard
-	var stderr limitedPlannerLog
-	cmd.Stderr = &stderr
-	if err = cmd.Run(); err != nil {
-		return decision, fmt.Errorf("Codex planner failed: %w (%s)", err, bounded(stderr.String(), 1500))
-	}
-	data, err := os.ReadFile(result)
-	if err != nil {
-		return decision, fmt.Errorf("planner did not produce a decision: %w", err)
-	}
-	if len(data) > 64000 {
-		return decision, fmt.Errorf("planner output exceeds 64KB")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&decision); err != nil {
-		return decision, fmt.Errorf("invalid planner JSON: %w", err)
-	}
-	if decoder.Decode(new(any)) != io.EOF {
-		return decision, fmt.Errorf("trailing planner output")
-	}
-	return decision, nil
+	return Decision{}, fmt.Errorf("planner execution requires OpenShell and is currently unavailable")
 }
 
 type limitedPlannerLog struct{ bytes.Buffer }

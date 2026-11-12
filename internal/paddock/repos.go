@@ -63,7 +63,7 @@ func RepoTrusted(home, commonDir string) (bool, error) {
 }
 
 func ResolveRepoArgument(home, value string) (string, error) {
-	// Absolute paths and explicit relative paths such as ./mirage bypass aliases.
+	// Absolute paths and explicit relative paths such as ./project bypass aliases.
 	if !aliasName.MatchString(value) {
 		return value, nil
 	}

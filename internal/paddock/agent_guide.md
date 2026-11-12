@@ -12,9 +12,7 @@ Paddock runs local coding tasks in Git worktrees and persistent terminals. Use t
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.
 
-New tasks use the configured default (`paddock runtime default`), initially OpenShell.
-An operator can explicitly choose `paddock runtime default host`; `--runtime` overrides
-that choice for one task. Missing OpenShell setup never triggers a host fallback.
+New tasks run in OpenShell. Existing host tasks can be inspected but cannot resume.
 See `paddock runtime --help`.
 Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
 and watches, and its CLI is not exposed in the sandbox. The host poller discovers
@@ -179,10 +177,8 @@ its own reply command and eyes receipt. Later thread replies and standalone comm
 arrive individually. GitHub does not support eyes reactions on review summaries.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
 and authorized authors trigger delivery. Incoming PR message delivery supports
-Codex and Claude tasks in both runtimes (host Claude requires macOS or Linux).
-Claude inbox delivery is qualified for Claude Code 2.1.286. Host sessions launched
-before inbox support must exit and be resumed with the updated CLI; do not kill or
-restart a live session merely to enable delivery. Its unconsumed comments stay pending.
+Codex and Claude tasks in OpenShell.
+Claude inbox delivery is qualified for Claude Code 2.1.286.
 Claude applies its own peer-message admission and tool approvals; held or uncertain
 deliveries require inspection, never terminal typing or blind retries.
 
@@ -190,26 +186,11 @@ Paddock does not automatically commit, push, create PRs, or merge. Those actions
 the user's requested workflow and repository conventions; installing this skill does
 not authorize additional publication or infrastructure changes.
 
-## Orchestrate signals
+## Dispatch from integrations
 
-When the user asks Paddock to choose where work belongs, use `paddock orchestrate`
-with a stable `--id`, an optional origin `--task`, and explicitly authorized `--tasks`
-and `--repos` scope. Use `--dry-run` to inspect a model-backed decision without acting;
-`orchestrate show SOURCE ID` shows saved context, rationale, and execution outcomes.
-The planner exits; launched agents remain durable. Never retry an uncertain action
-with a new signal ID merely to get it to run again.
-
-`paddock planner configure --model MODEL --instructions-file PATH` sets registry
-planning preferences; `planner show` displays them. Per-run model/instructions flags
-are available. Planning uses the existing Codex subscription login. Do not fetch API
-keys or alter the user's coding-agent settings to make the planner work.
-
-GitHub planning is opt-in through `github routing PR_URL --mode planner`. Preserve
-existing routing and scope unless the user requests a change. The source PR does not
-necessarily own subsequent work; a validated signal can target another authorized task.
-Recipients should use the supplied reply command for that specific originating event.
-A newly launched orchestration task already has its worktree and agent: perform its
-assignment here rather than creating another task to satisfy the requested isolation.
+Use `paddock run --external-id`, `paddock message --external-id`, and
+`paddock artifacts --json` for deterministic dispatch, receipts, and inspection.
+Model-backed planning is unavailable until its LLM runs in OpenShell.
 
 ## Workspace retention
 

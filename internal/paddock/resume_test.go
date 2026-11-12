@@ -3,6 +3,7 @@ package paddock
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,9 @@ func TestOnlyConfirmedInitialMCPFailureCanReplayAssignment(t *testing.T) {
 		want   bool
 	}{
 		{"host Codex missing before first agent start", func(*Task) {}, true},
+		{"host MCP grant blocked before first agent start", func(t *Task) {
+			t.Error = "trusted host MCP tools are unavailable; LLM tool execution requires OpenShell"
+		}, true},
 		{"saved conversation must resume", func(t *Task) { t.Session.ConversationID = "saved-conversation" }, false},
 		{"previous resume must not replay", func(t *Task) { t.Session.Resume = true }, false},
 		{"missing history alone is insufficient", func(t *Task) { t.Error = "exit status 1" }, false},
@@ -38,6 +42,28 @@ func TestOnlyConfirmedInitialMCPFailureCanReplayAssignment(t *testing.T) {
 				t.Fatalf("retry initial assignment = %t; want %t", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHostTaskCannotRestartThroughMessageOrLockedResume(t *testing.T) {
+	store, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	task := Task{ID: newID(), Runtime: "host", Status: "stopped", Session: Session{Agent: "codex", ConversationID: newConversationID()}}
+	if err := store.Insert(task); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Store: store}
+	if _, err := service.resumeLocked(context.Background(), task.ID); err == nil || !strings.Contains(err.Error(), "OpenShell") {
+		t.Fatalf("locked resume accepted host task: %v", err)
+	}
+	if _, err := service.Message(context.Background(), task, "continue"); err == nil || !errors.Is(err, ErrAgentOffline) || !strings.Contains(err.Error(), "OpenShell") {
+		t.Fatalf("message accepted host task: %v", err)
+	}
+	if state := service.WatchSessionState(context.Background(), task.ID); state != "unsupported" {
+		t.Fatalf("host task advertised GitHub delivery state %q", state)
 	}
 }
 
@@ -126,6 +152,7 @@ done
 }
 
 func TestGitHubWakesSameConversationOnce(t *testing.T) {
+	t.Skip("legacy host agent execution is disabled")
 	s, task, _ := gcFixture(t)
 	s.Executable = buildCLI(t)
 	log, active, finish := filepath.Join(t.TempDir(), "messages"), filepath.Join(t.TempDir(), "active"), filepath.Join(t.TempDir(), "finish")
@@ -243,6 +270,7 @@ func TestRecoveryAfterManualRemovalAndMovedBranch(t *testing.T) {
 }
 
 func TestResumeSerializesAndKeepsWarmState(t *testing.T) {
+	t.Skip("legacy host agent execution is disabled")
 	s, task, _ := gcFixture(t)
 	exe := buildCLI(t)
 	s.Executable = exe

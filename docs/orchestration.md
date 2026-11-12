@@ -1,5 +1,9 @@
 # Ephemeral orchestration
 
+> Model-backed orchestration is currently unavailable. Its former planner ran
+> on the host; all LLM execution now requires OpenShell. The material below
+> describes the retired design and should not be used as current setup guidance.
+
 Paddock's orchestration entry point runs **Signal → Perceive → Plan → Act → Exit**.
 A subscription-backed Codex CLI chooses structured actions. Paddock validates and
 executes them through the existing task launcher, native message queue, and GitHub

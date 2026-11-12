@@ -3,9 +3,18 @@
 Commands, configuration, and operating details. For an introduction and the
 basic workflow, start with the [README](../README.md).
 
+For named agent identities, GitHub App registration, and deterministic service
+dispatch, see [GitHub identity onboarding](github.md#create-a-named-paddock-identity-and-register-its-app)
+and [the integration interface](integrations.md).
+
 ## Setup
 
-Requirements: Git, a configured OpenShell gateway/agent image/model provider and mapped GitHub App, and either a running local Rex server or GNU Screen. Host mode instead uses a logged-in local `codex` or `claude`. macOS is the tested development platform; the terminal adapters also target Unix environments. Native Windows terminal execution is not implemented (use WSL). Building a Windows binary alone does not provide Windows terminal support.
+Requirements: Git, a configured OpenShell gateway, agent image, model provider,
+a named identity, and either a running local Rex server or GNU Screen. A GitHub
+App is required for GitHub work; local-only identities need no App. macOS is
+the tested development platform; the terminal adapters also target Unix
+environments. Native Windows terminal execution is not implemented (use WSL).
+Building a Windows binary alone does not provide Windows terminal support.
 
 Development tooling is pinned with [mise](https://mise.jdx.dev/):
 
@@ -73,22 +82,19 @@ Control setting to allow session selection.
 
 Use arrows to choose a repository or agent, Tab / Shift-Tab to move between
 fields, Enter for a newline in the prompt, and Escape or Ctrl-C to cancel. Both
-Codex and Claude Code are shown in the agent list; the runtime list shows
-OpenShell (sandbox) and Host (local machine). Selecting **Cancel** or pressing
+Codex and Claude Code are shown in the agent list; all agent tasks use OpenShell. Selecting **Cancel** or pressing
 Escape or Ctrl-C creates no task. Launch errors remain visible until
 dismissed. If session selection fails after creation, the launcher shows the
 existing task's attach command; it does not launch again.
 
 `new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
-`--client`. The runtime selector starts at the configured default, or at
-`--runtime` when supplied. Changing it applies only to the new task and leaves
-the saved default unchanged. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
+`--client`. `--runtime` accepts only `openshell`. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
 terminal selection as `run`. Use `run` for scripts and pipelines.
 
 Setup records the executable's absolute path. Install Paddock at its stable
 location before running setup, and rerun setup if that location changes. It
 also records the setup shell's PATH and explicit Paddock tool overrides so
-mise-managed agents and the host MCP bridge work when Rex starts from the GUI.
+Rex can find the Paddock executable when started from the GUI.
 Run setup from a shell where your agents are available, and rerun it after
 changing their installation paths. Other shell environment variables and
 credentials are not copied into the launcher configuration. Setup updates only
@@ -177,15 +183,9 @@ For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_l
 
 Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in Codex.
 
-To grant OpenShell tasks access to selected host MCP connections, use
-`paddock repo trust project --mcp observe,metabase`. This grants project trust
-and access to those named HTTPS MCP servers using host Codex's existing login
-and network. MCP grants are additive; ordinary project trust grants none.
-Use `paddock repo untrust project --mcp metabase` to revoke one server, or
-`paddock repo untrust project` to revoke all grants along with project trust.
-Revocation blocks new requests immediately. Exit and resume the agent to load
-new grants. See [trusted MCP connections](openshell.md#trusted-mcp-connections)
-for authentication, scope, and configuration-change behavior.
+Trusted host MCP connections are unavailable for agent tasks because tool calls
+must execute inside OpenShell. Remove existing grants with `paddock repo untrust
+project --mcp NAME` before resuming an affected task.
 
 ### Remembering Codex hook decisions
 
@@ -394,7 +394,7 @@ for artifact policy, recovery, and the current automatic-shutdown limitation.
 
 Repository identity uses Git's common directory, including when launched from a linked worktree, bare repository, or subdirectory. Base selection uses locally available refs in this order: `origin/HEAD`, `origin/main`, `origin/master`, configured `init.defaultBranch`, `main`, `master`. For other layouts, specify `--base`. Paddock does not fetch automatically: run `git fetch` yourself when you want fresher remote refs. The resolved commit is recorded before worktree creation.
 
-Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. OpenShell tasks use a private Git database inside their retained sandbox. Explicit host tasks share the original Git database and provide working-directory isolation only. Post-checkout hooks are disabled for worktree creation.
+Paddock creates branch `paddock/<id>` and checks it out in the task's worktree. It does not switch, stash, reset, or edit the original checkout or its index. OpenShell tasks use a private Git database inside their retained sandbox. Post-checkout hooks are disabled for worktree creation.
 
 Worktrees stay warm until explicit `paddock gc --apply` passes the retention and safety checks. Task JSON records refer to native conversation history; the JSON alone is not a conversation or filesystem backup.
 
@@ -434,19 +434,9 @@ Native macOS operation is tested. Linux and Windows compilation is checked separ
 
 Copyright 2026 Paddock contributors. Licensed under the [Apache License, Version 2.0](../LICENSE).
 
-### Intelligent orchestration
+### Integration dispatch
 
-`paddock orchestrate` runs an ephemeral, subscription-backed Codex planner against
-scoped tasks, sessions, repositories, and PR discussion. It can ignore, message an
-existing agent, delegate a child, create independent work in another repository, or
-reply. Decisions and outcomes are durable; repeated signals do not duplicate work.
-
-```sh
-paddock planner configure --model MODEL --instructions-file ./pit-wall.txt
-paddock orchestrate --id request-104 --task TASK_ID --dry-run "Investigate this request"
-```
-
-GitHub watches keep direct messaging by default. Enable planning explicitly with
-`paddock github routing PR_URL --mode planner`, adding `--tasks` and `--repos` for
-cross-task or cross-repository scope. See [orchestration](orchestration.md) for
-configuration, previews, context reads, authorization, and the real-model acceptance run.
+Use `paddock run --external-id`, `paddock message --external-id`, and
+`paddock artifacts --json` for deterministic integration dispatch. See
+[integration CLI](integrations.md). Model-backed orchestration is unavailable
+until its planner runs in OpenShell.
