@@ -29,14 +29,18 @@ task; changed prompt, requester, context, or explicitly supplied repository,
 base, runtime, and terminal choices are rejected. A restarted integration can scan
 `tasks --json` for its external ID, then inspect `show --json` for status,
 session, branch, worktree, errors, child tasks, and pending access requests.
-For a live Codex task, `show --json` also reads the saved native conversation
-and reports `last_turn.state` (`none`, `inProgress`, `completed`, `failed`,
-`interrupted`, or `unknown`). A completed turn can coexist with a running
-interactive terminal. An inspection failure is `unknown` with an error, never
-inferred completion. The `blocked` flag means unresolved OpenShell access
+For a live Codex task, `show --json` reads the saved native conversation and
+reports `last_turn.state` (`none`, `inProgress`, `completed`, `failed`,
+`interrupted`, or `unknown`). For Claude, Paddock reads only structural events
+from the pinned native transcript inside OpenShell; a `turn_duration` following
+the latest user prompt proves completion. A queued follow-up remains
+`inProgress` until its own turn completes. A completed turn can coexist with a
+running interactive terminal. An inspection failure is `unknown` with an error,
+never inferred completion. The `blocked` flag means unresolved OpenShell access
 proposals exist; inspect `access_requests` and `last_turn` together because a
-proposal can remain pending after the agent finishes a turn. Claude currently
-has no native turn field in this view.
+proposal can remain pending after the agent finishes a turn. Claude's initial
+workspace trust dialog is a native approval and may show `last_turn.state:
+none` until a human responds.
 Launch preparation holds a live process lease. If the dispatching CLI dies
 before recording a launch, a later status refresh marks the stale task
 `interrupted` after two minutes; an active slow preparation stays `preparing`.

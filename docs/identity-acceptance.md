@@ -86,6 +86,13 @@ changed.
   strict metadata isolation remains open. A task-local libseccomp prototype
   could resolve the relevant metadata syscalls, but the qualified guest's
   `seccomp_load` returned `ECANCELED`; no metadata filter was deployed.
+- A rebuilt CLI read the still-running Claude task's pinned native transcript
+  inside OpenShell while its workspace trust prompt was open. `show --json`
+  returned `last_turn.state: none`, without sending transcript content to the
+  host. The same structural reader identified completed turns in five existing
+  Claude session logs and an unfinished final prompt in a sixth; its focused
+  fixture also covers queued follow-ups and partial transcript appends. A live
+  Claude model turn remains pending human workspace trust.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -117,5 +124,7 @@ lookup failures are reported separately from local workspace artifacts.
   write denial, clean worktree, and follow-up behavior.
 - Prevent investigation agents from changing checkout metadata such as file
   modes while preserving writable home and build scratch space.
-- Provide the same native turn-completion signal for Claude; the current
-  structured `last_turn` field covers Codex only.
+- Verify Claude's new native transcript turn-completion signal in a live
+  OpenShell task after the operator accepts the workspace trust prompt. The
+  parser uses structural events only and keeps transcript content in the
+  sandbox.

@@ -3,10 +3,41 @@ package paddock
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"time"
 )
+
+//go:embed claude_turn.py
+var claudeTurnScript string
+
+// ClaudeLastTurn reads structural events from the pinned native transcript
+// inside OpenShell. The transcript itself never leaves the sandbox.
+func ClaudeLastTurn(ctx context.Context, task Task) (AgentTurn, error) {
+	unknown := AgentTurn{State: "unknown"}
+	if task.RuntimeName() != "openshell" || task.Session.Agent != "claude" ||
+		!conversationUUID.MatchString(task.Session.ConversationID) || task.Session.AgentHome == "" {
+		return unknown, fmt.Errorf("task has no saved OpenShell Claude conversation")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	output, err := sandboxOutput(ctx, task, "python3", "-c", claudeTurnScript,
+		task.Session.AgentHome, task.Session.ConversationID, task.Worktree)
+	if err != nil {
+		return unknown, err
+	}
+	var turn AgentTurn
+	if err := json.Unmarshal([]byte(output), &turn); err != nil {
+		return unknown, fmt.Errorf("invalid Claude turn inspection response: %w", err)
+	}
+	switch turn.State {
+	case "none", "inProgress", "completed":
+		return turn, nil
+	default:
+		return unknown, fmt.Errorf("Claude returned an unknown turn status")
+	}
+}
 
 // CodexLastTurn reads the saved native thread without starting a model turn.
 // The TUI can remain running after a turn completes, so terminal state alone

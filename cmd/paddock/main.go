@@ -515,12 +515,21 @@ func run(args []string, out io.Writer) error {
 			return err
 		}
 		var lastTurn *paddock.AgentTurn
-		if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" && t.OpenShell != nil && t.OpenShell.Ready && obs.State == "running" {
-			turn, turnErr := paddock.CodexLastTurn(ctx, t)
+		if t.RuntimeName() == "openshell" && t.OpenShell != nil && t.OpenShell.Ready && obs.State == "running" {
+			var turn paddock.AgentTurn
+			var turnErr error
+			switch t.Session.Agent {
+			case "codex":
+				turn, turnErr = paddock.CodexLastTurn(ctx, t)
+			case "claude":
+				turn, turnErr = paddock.ClaudeLastTurn(ctx, t)
+			}
 			if turnErr != nil {
 				turn.Error = turnErr.Error()
 			}
-			lastTurn = &turn
+			if t.Session.Agent == "codex" || t.Session.Agent == "claude" {
+				lastTurn = &turn
+			}
 		}
 		if o["json"] != "" {
 			return emit(out, paddock.Detail{Task: t, Terminal: obs, LastTurn: lastTurn, Children: children, AccessRequests: accessRequests, Blocked: len(accessRequests) > 0})
