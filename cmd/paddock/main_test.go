@@ -33,6 +33,14 @@ func TestLoadPrompt(t *testing.T) {
 	if err != nil || prompt != multiline {
 		t.Fatal(prompt, err)
 	}
+	maxPrompt := strings.Repeat("x", maxPromptBytes)
+	prompt, err = loadPrompt("run", []string{"-"}, "", strings.NewReader(maxPrompt))
+	if err != nil {
+		t.Fatalf("rejected stdin prompt of exactly %d bytes: %v", maxPromptBytes, err)
+	}
+	if prompt != maxPrompt {
+		t.Fatalf("stdin prompt changed: got %d bytes, want %d", len(prompt), len(maxPrompt))
+	}
 	path := t.TempDir() + "/goal.md"
 	if err = os.WriteFile(path, []byte(multiline), 0600); err != nil {
 		t.Fatal(err)
@@ -51,6 +59,7 @@ func TestLoadPrompt(t *testing.T) {
 		in   string
 	}{
 		{nil, "", ""},
+		{[]string{"first prompt", "second prompt"}, "", ""},
 		{[]string{"prompt"}, path, ""},
 		{[]string{"-"}, "", " \n"},
 		{[]string{"-"}, "", strings.Repeat("x", maxPromptBytes+1)},
