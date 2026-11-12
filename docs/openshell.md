@@ -106,17 +106,18 @@ Go cache, and Go module cache remain writable. Claude's inbox socket lives in
 `/home/sandbox/.claude`, which trusted preparation sets to mode `0700` as
 required by Claude. The guard also denies socket creation in the
 checkout. Rebuild and pin the runtime image after updating Paddock; an older
-image cannot launch a guarded Claude investigation. The trusted sandbox launcher is
-non-dumpable so an agent running under the same Unix UID cannot inspect its
-memory. Preparation probes that the worktree rejects file and socket creation
-while scratch accepts them; failure stops launch. An older investigation task
+image cannot launch a guarded Claude investigation. The trusted sandbox launcher
+enters the same Landlock rules before starting the agent; its lock and exit
+records live in a private home directory. Inspection of the same-UID launcher
+cannot restore source write rights. Preparation probes that the worktree rejects
+file and socket creation while scratch accepts them; failure stops launch. An
+older investigation task
 without the current verified guard cannot resume or receive a follow-up; create
 a new task. The OpenShell
 startup policy still limits the entire sandbox's host and network access.
-On the qualified 0.1.6 runtime, Claude investigation currently stops at model
-connection: OpenShell's proxy cannot read the non-dumpable launcher executable
-to verify process identity. Keep this profile in acceptance until the trusted
-launcher can be protected without blocking the proxy.
+Guard version 3 leaves the launcher's executable readable to OpenShell's
+process identity check. A live App-backed Claude investigation completed a
+read-only turn and a native inbox follow-up under this guard.
 Linux Landlock does not restrict metadata operations such as `chmod`; a live
 probe could change the mode of a temporary worktree file. Investigation tasks
 cannot push with their read-only GitHub token, but strict worktree metadata

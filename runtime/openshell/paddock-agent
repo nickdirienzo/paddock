@@ -9,7 +9,8 @@ import subprocess
 import sys
 import time
 
-lock = open('/sandbox/agent.lock', 'a')
+control = pathlib.Path(os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox'))
+lock = open(control / 'agent.lock', 'a')
 try:
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError:
@@ -44,7 +45,7 @@ if pathlib.Path(sys.argv[2]).name == 'codex':
         if result.returncode:
             sys.exit('Could not restore the native conversation in the OpenShell runtime.')
 
-marker = pathlib.Path('/sandbox/agent-exit.json')
+marker = control / 'agent-exit.json'
 marker.unlink(missing_ok=True)
 agent_args = sys.argv[2:]
 claude = pathlib.Path(sys.argv[2]).name == 'claude'
@@ -59,7 +60,7 @@ child = subprocess.Popen(agent_args)
 if claude:
     flag = '--resume' if '--resume' in agent_args else '--session-id'
     session = agent_args[agent_args.index(flag) + 1]
-    state = pathlib.Path('/sandbox/claude-process.json')
+    state = control / 'claude-process.json'
     state.write_text(json.dumps({'pid': child.pid, 'conversation': session,
                                 'generation': int(sys.argv[1])}))
     state.chmod(0o600)

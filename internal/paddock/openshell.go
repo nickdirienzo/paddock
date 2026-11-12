@@ -146,6 +146,12 @@ func (s Service) CheckOpenShell(ctx context.Context) error {
 	_, e = c.call(ctx, "gateway", "info")
 	return e
 }
+func agentControlDir(t Task) string {
+	if t.Provenance.Profile == "investigation" {
+		return "/home/sandbox/.paddock"
+	}
+	return "/sandbox"
+}
 func sandboxExec(ctx context.Context, t Task, tty bool, args ...string) *exec.Cmd {
 	flags := []string{"sandbox", "exec", t.OpenShell.Name, "--no-login-shell", "--workdir", t.Worktree}
 	if tty {
@@ -153,7 +159,7 @@ func sandboxExec(ctx context.Context, t Task, tty bool, args ...string) *exec.Cm
 	} else {
 		flags = append(flags, "--no-tty")
 	}
-	for _, v := range []string{"TERM=xterm-256color", "HOME=/home/sandbox", "PATH=/sandbox/.paddock/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME=/home/sandbox/.codex", "CLAUDE_CONFIG_DIR=/home/sandbox/.claude", "PADDOCK_TASK_ID=" + t.ID, "GOCACHE=/sandbox/go-cache", "GOPATH=/sandbox/go-path"} {
+	for _, v := range []string{"TERM=xterm-256color", "HOME=/home/sandbox", "PATH=/sandbox/.paddock/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME=/home/sandbox/.codex", "CLAUDE_CONFIG_DIR=/home/sandbox/.claude", "PADDOCK_TASK_ID=" + t.ID, "PADDOCK_CONTROL_DIR=" + agentControlDir(t), "GOCACHE=/sandbox/go-cache", "GOPATH=/sandbox/go-path"} {
 		flags = append(flags, "--env", v)
 	}
 	if t.OpenShell.Config.CodexAccountID != "" {
@@ -519,8 +525,8 @@ git --git-dir=/sandbox/repository.git config user.name "$3"
 git --git-dir=/sandbox/repository.git config user.email "$4"
 git --git-dir=/sandbox/repository.git -c core.hooksPath=/dev/null worktree add -b "$2" /sandbox/worktree refs/heads/seed
 rm /sandbox/seed.bundle
-mkdir -p /home/sandbox/.codex /home/sandbox/.claude
-chmod 700 /home/sandbox/.codex /home/sandbox/.claude
+mkdir -p /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
+chmod 700 /home/sandbox/.codex /home/sandbox/.claude /home/sandbox/.paddock
 `
 	remoteURL := ""
 	if t.OpenShell.Provider != "" {
@@ -636,8 +642,8 @@ func (s Service) startTaskSandbox(ctx context.Context, t *Task) error {
 	// lives inside the sandbox and is held by the native process's launcher.
 	probe := *t
 	probe.Worktree = "/sandbox"
-	if _, e = sandboxOutput(ctx, probe, "python3", "-c", `import fcntl
-f=open('/sandbox/agent.lock','a'); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)`); e != nil {
+	if _, e = sandboxOutput(ctx, probe, "python3", "-c", `import fcntl, sys
+f=open(sys.argv[1]+'/agent.lock','a'); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)`, agentControlDir(*t)); e != nil {
 		return fmt.Errorf("sandbox agent may still be active; refusing a second launch")
 	}
 	if t.OpenShell.Provider != "" {
@@ -659,7 +665,7 @@ func stopCompletedSandbox(ctx context.Context, t Task) error {
 	if _, e := inspectTaskSandbox(ctx, t); e != nil {
 		return e
 	}
-	result, e := sandboxOutput(ctx, t, "cat", "/sandbox/agent-exit.json")
+	result, e := sandboxOutput(ctx, t, "cat", agentControlDir(t)+"/agent-exit.json")
 	if e != nil {
 		return fmt.Errorf("remote agent exit is unconfirmed; sandbox retained running")
 	}

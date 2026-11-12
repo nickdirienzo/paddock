@@ -9,7 +9,7 @@ import (
 )
 
 const investigationGuardDir = "/sandbox/.paddock/guard"
-const investigationGuardVersion = 2
+const investigationGuardVersion = 3
 
 func investigationGuardReady(t Task) bool {
 	return t.OpenShell != nil && t.OpenShell.ReadOnlyGuard && t.OpenShell.ReadOnlyGuardVersion >= investigationGuardVersion
@@ -33,6 +33,14 @@ func installInvestigationGuard(ctx context.Context, t Task, hostDir string) erro
 	}
 	bootstrap := t
 	bootstrap.Worktree = "/sandbox"
+	// The guarded launcher writes only under its private home. Reject images
+	// that still put control files beside the checkout before the agent starts.
+	checkControl := `from pathlib import Path
+if 'PADDOCK_CONTROL_DIR' not in Path('/usr/local/bin/paddock-agent').read_text():
+    raise SystemExit(1)`
+	if _, err := sandboxOutput(ctx, bootstrap, "python3", "-c", checkControl); err != nil {
+		return fmt.Errorf("investigation requires an OpenShell image with home-directory control files; rebuild the runtime image: %w", err)
+	}
 	if t.Session.Agent == "claude" {
 		// Older images bind the native inbox in /sandbox, which would require
 		// granting MAKE_SOCK to the entire checkout subtree. Fail before launch.

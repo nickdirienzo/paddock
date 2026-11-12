@@ -96,9 +96,20 @@ changed.
   connection. OpenShell logs showed its proxy could not read the non-dumpable
   trusted launcher's `/proc/<pid>/exe` while resolving the requesting binary;
   there was no pending policy proposal and the model provider was refreshed.
-  The sandbox was stopped. A completed Claude model turn still requires a
-  launcher design that protects the investigation boundary while permitting
-  OpenShell's process identity check.
+  The sandbox was stopped.
+- Guard version 3 places launcher control files in private writable home and
+  applies the same Landlock rules to the launcher before it starts Claude.
+  App-backed Claude investigation `f601a7c947be213ab21e7106` launched in a
+  rebuilt image, reached native workspace trust, and completed its model turn
+  after the operator accepted trust. Its tool output shows file creation and
+  Unix socket binding under `/sandbox/worktree` both failed with `Permission
+  denied`; `git status --porcelain` was clean. Paddock reported
+  `last_turn.state: completed`, with no commits, untracked files, or PRs. A
+  follow-up with external ID `acceptance-20261112-claude-v3-followup-1` was
+  delivered to the saved Claude session and completed a second clean `git
+  status`; replaying that ID returned the same receipt without another message.
+  Unused network proposals still made `blocked: true`, independently of the
+  completed turns.
 - A further guarded probe showed that `chmod` on a temporary worktree file
   still succeeds. Landlock enforces the tested file-content write denial but
   does not make worktree metadata immutable. The temporary file was removed;
@@ -117,8 +128,9 @@ changed.
   returned `last_turn.state: none`, without sending transcript content to the
   host. The same structural reader identified completed turns in five existing
   Claude session logs and an unfinished final prompt in a sixth; its focused
-  fixture also covers queued follow-ups and partial transcript appends. A new
-  Claude model turn will require human workspace trust.
+  fixture also covers queued follow-ups and partial transcript appends. The
+  version-3 live task confirmed this signal across both the initial turn and a
+  follow-up.
 
 Automated tests cover identity ownership, profile authorization, read-only
 GitHub policy construction, immutable provenance, external dispatch
@@ -146,12 +158,5 @@ lookup failures are reported separately from local workspace artifacts.
   model-backed planning, and trusted host MCP tools. The corresponding commands
   now fail closed; the App-backed Codex implementation path completed its test,
   commit, and draft PR.
-- Launch a new Claude investigation with the rebuilt image, complete native
-  workspace trust, and verify its write denial, clean worktree, and follow-up
-  behavior after resolving the proxy's process identity check.
 - Prevent investigation agents from changing checkout metadata such as file
   modes while preserving writable home and build scratch space.
-- Verify Claude's new native transcript turn-completion signal in a live
-  OpenShell task after the operator accepts the workspace trust prompt. The
-  parser uses structural events only and keeps transcript content in the
-  sandbox.

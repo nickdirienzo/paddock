@@ -5,6 +5,7 @@ Never turn a failed/uncertain write into a retry. The persisted native queue
 record is evidence of admission, not evidence of turn completion.
 """
 import json
+import os
 import pathlib
 import socket
 import struct
@@ -71,4 +72,4 @@ if __name__ == '__main__':
     body = json.load(sys.stdin)['message']
     if not isinstance(body, str) or not body.strip() or len(body.encode()) > 512000:
         sys.exit('Invalid message')
-    print(deliver('/sandbox', sys.argv[1], int(sys.argv[2]), body))
+    print(deliver(os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox'), sys.argv[1], int(sys.argv[2]), body))

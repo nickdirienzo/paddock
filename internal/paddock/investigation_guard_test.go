@@ -16,6 +16,9 @@ func TestInvestigationAgentStartsThroughReadOnlyGuard(t *testing.T) {
 	if !strings.Contains(args, investigationGuardDir+"/launch.py") || !strings.Contains(args, investigationGuardDir+"/codex") || strings.Contains(args, "/usr/local/bin/paddock-agent 1 /usr/local/bin/codex") {
 		t.Fatalf("investigation bypasses guard: %s", args)
 	}
+	if !strings.Contains(args, "PADDOCK_CONTROL_DIR=/home/sandbox/.paddock") {
+		t.Fatalf("investigation control files are outside guarded home: %s", args)
+	}
 }
 
 func TestLegacyInvestigationGuardCannotResumeOrReceiveMessages(t *testing.T) {
@@ -25,7 +28,7 @@ func TestLegacyInvestigationGuardCannotResumeOrReceiveMessages(t *testing.T) {
 	}
 	defer store.Close()
 	task := Task{ID: newID(), Runtime: "openshell", Status: "stopped", Provenance: TaskProvenance{Profile: "investigation"},
-		Session: Session{Agent: "codex", ConversationID: newConversationID()}, OpenShell: &OpenShellTask{Name: "pd-legacy", Ready: true, ReadOnlyGuard: true, ReadOnlyGuardVersion: 1}}
+		Session: Session{Agent: "codex", ConversationID: newConversationID()}, OpenShell: &OpenShellTask{Name: "pd-legacy", Ready: true, ReadOnlyGuard: true, ReadOnlyGuardVersion: 2}}
 	if err := store.Insert(task); err != nil {
 		t.Fatal(err)
 	}
