@@ -155,13 +155,23 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 	}
 	stopMCP := func() {}
 	if t.RuntimeName() == "openshell" {
-		stopMCP, err = startTrustedMCPBridge(store, t)
+		var unavailable []string
+		stopMCP, unavailable, err = startTrustedMCPBridge(store, t)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not configure trusted MCPs:", err)
 			_ = store.Finish(t.ID, 1, err.Error())
 			return 1
 		}
 		defer stopMCP()
+		if len(unavailable) > 0 {
+			notice := "Paddock MCP availability: " + strings.Join(unavailable, ", ") + " unavailable at launch. Continue with available MCP servers. If the task needs an unavailable server, report the missing access and do not substitute an incomplete result."
+			fmt.Fprintln(os.Stderr, notice)
+			if t.Session.Resume {
+				t.Session.ResumeNotice = strings.TrimSpace(t.Session.ResumeNotice + "\n\n" + notice)
+			} else {
+				t.Prompt += "\n\n" + notice
+			}
+		}
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
 	var inbox claudeInbox

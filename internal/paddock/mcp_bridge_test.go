@@ -41,6 +41,12 @@ func TestSandboxMCPInstallPreservesConfigAndRemovesRevokedEntries(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("sandbox_mode = \"danger-full-access\"\n[mcp_servers.unmanaged]\ncommand = \"local-command\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", ".claude.json"), []byte(`{"mcpServers":{"oshell-native":{"command":"/usr/local/bin/native-mcp"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	installer := strings.ReplaceAll(strings.ReplaceAll(installSandboxMCP, "/sandbox/.paddock", root), "/home/sandbox", home)
 	for _, names := range [][]string{{"observe", "metabase"}, {"metabase"}, {}} {
 		payload, err := sandboxMCPConfiguration(names)
@@ -76,9 +82,42 @@ func TestSandboxMCPInstallPreservesConfigAndRemovesRevokedEntries(t *testing.T) 
 		var claude struct {
 			Servers map[string]any `json:"mcpServers"`
 		}
-		if json.Unmarshal(b, &claude) != nil || len(claude.Servers) != len(names) {
-			t.Fatal("Claude MCP config did not follow trust")
+		if json.Unmarshal(b, &claude) != nil || len(claude.Servers) != len(names)+1 {
+			t.Fatal("Claude MCP config did not follow trust or preserve the OpenShell server")
 		}
+		if native, ok := claude.Servers["oshell-native"].(map[string]any); !ok || native["command"] != "/usr/local/bin/native-mcp" {
+			t.Fatal("OpenShell MCP server was changed")
+		}
+	}
+}
+
+type catalogMCPNative struct{}
+
+func (catalogMCPNative) call(_ context.Context, method string, params any, result any) error {
+	if method != "mcpServerStatus/list" {
+		return io.ErrUnexpectedEOF
+	}
+	name := params.(map[string]any)["serverName"].(string)
+	var server any
+	switch name {
+	case "observe":
+		server = map[string]any{"name": name, "tools": map[string]any{"search": map[string]any{"name": "search"}}}
+	case "metabase":
+		server = map[string]any{"name": name, "toolsError": "login required"}
+	case "empty":
+		server = map[string]any{"name": name, "tools": map[string]any{}}
+	default:
+		server = map[string]any{"name": name}
+	}
+	b, _ := json.Marshal(map[string]any{"data": []any{server}})
+	return json.Unmarshal(b, result)
+}
+
+func TestReadyTrustedMCPsOmitsOnlyUnavailableCatalogs(t *testing.T) {
+	broker := mcpBroker{native: catalogMCPNative{}, thread: "thread"}
+	ready, unavailable := readyTrustedMCPs(context.Background(), broker, []string{"observe", "metabase", "empty", "pending"})
+	if strings.Join(ready, ",") != "observe,empty" || strings.Join(unavailable, ",") != "metabase,pending" {
+		t.Fatalf("ready=%v unavailable=%v", ready, unavailable)
 	}
 }
 
@@ -244,6 +283,10 @@ func TestMCPNativeIntegration(t *testing.T) {
 	inventory, err := broker.inventory(ctx, "trusted")
 	if err != nil || len(inventory.Tools) != 1 || inventory.ToolsError != nil {
 		t.Fatalf("native MCP discovery: %+v %v", inventory, err)
+	}
+	ready, unavailable := readyTrustedMCPs(ctx, broker, []string{"trusted"})
+	if len(ready) != 1 || ready[0] != "trusted" || len(unavailable) != 0 {
+		t.Fatalf("native MCP startup catalog: ready=%v unavailable=%v", ready, unavailable)
 	}
 	var response json.RawMessage
 	if err = native.call(ctx, "mcpServer/tool/call", map[string]any{"threadId": native.thread, "server": "trusted", "tool": "read_status", "arguments": map[string]any{}}, &response); err != nil {
