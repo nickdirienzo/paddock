@@ -158,6 +158,24 @@ func (b mcpBroker) inventory(ctx context.Context, name string) (mcpInventory, er
 	}
 }
 
+// readyTrustedMCPs checks the host catalog before advertising bridge clients to
+// an interactive agent. A failed server would otherwise stop Claude at its MCP
+// startup menu even when other servers are usable.
+func readyTrustedMCPs(ctx context.Context, broker mcpBroker, names []string) (ready, unavailable []string) {
+	for _, name := range names {
+		check, cancel := context.WithTimeout(ctx, 20*time.Second)
+		inventory, err := broker.inventory(check, name)
+		cancel()
+		if err != nil || inventory.ToolsError != nil ||
+			(inventory.Tools == nil && inventory.Resources == nil && inventory.ResourceTemplates == nil) {
+			unavailable = append(unavailable, name)
+			continue
+		}
+		ready = append(ready, name)
+	}
+	return ready, unavailable
+}
+
 func (b mcpBroker) dispatch(ctx context.Context, name string, request mcpRequest) any {
 	errorReply := func(code int, message string) any {
 		return map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": code, "message": message}}
@@ -286,30 +304,47 @@ func (b mcpBroker) dispatch(ctx context.Context, name string, request mcpRequest
 // startTrustedMCPBridge owns both sides for exactly one supervisor lifetime.
 // All outbound MCP traffic and OAuth refresh remain on the host; the workload
 // can address only its repository's explicitly selected MCP server names.
-func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
+func startTrustedMCPBridge(store *Store, task Task) (func(), []string, error) {
 	set, err := loadTrustedMCPs(store.Home, task.CommonDir)
 	if err != nil {
-		return nil, err
-	}
-	setup, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
-	err = installTrustedMCPs(setup, task, set.names)
-	cancelSetup()
-	if err != nil {
-		return nil, fmt.Errorf("configure trusted MCPs: %w", err)
+		return nil, nil, err
 	}
 	if len(set.names) == 0 {
-		return func() {}, nil
+		setup, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
+		err = installTrustedMCPs(setup, task, nil)
+		cancelSetup()
+		if err != nil {
+			return nil, nil, fmt.Errorf("configure trusted MCPs: %w", err)
+		}
+		return func() {}, nil, nil
 	}
 	dir, err := os.MkdirTemp(store.Home, ".mcp-bridge-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	native, stopNative, err := startNativeMCP(ctx, set, dir)
 	if err != nil {
 		cancel()
 		_ = os.RemoveAll(dir)
-		return nil, err
+		return nil, nil, err
+	}
+	broker := mcpBroker{storeHome: store.Home, commonDir: task.CommonDir, set: set, native: native, thread: native.thread}
+	readyNames, unavailable := readyTrustedMCPs(ctx, broker, set.names)
+	setup, cancelSetup := context.WithTimeout(ctx, 30*time.Second)
+	err = installTrustedMCPs(setup, task, readyNames)
+	cancelSetup()
+	if err != nil {
+		cancel()
+		stopNative()
+		_ = os.RemoveAll(dir)
+		return nil, nil, fmt.Errorf("configure trusted MCPs: %w", err)
+	}
+	if len(readyNames) == 0 {
+		cancel()
+		stopNative()
+		_ = os.RemoveAll(dir)
+		return func() {}, unavailable, nil
 	}
 	cmd := sandboxExec(ctx, task, false, "/usr/bin/python3", "-u", "/sandbox/.paddock/mcp.py", "serve", "/sandbox/.paddock")
 	input, err := cmd.StdinPipe()
@@ -317,7 +352,7 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 		cancel()
 		stopNative()
 		_ = os.RemoveAll(dir)
-		return nil, err
+		return nil, nil, err
 	}
 	output, err := cmd.StdoutPipe()
 	if err != nil {
@@ -325,14 +360,14 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 		cancel()
 		stopNative()
 		_ = os.RemoveAll(dir)
-		return nil, err
+		return nil, nil, err
 	}
 	if err = cmd.Start(); err != nil {
 		_ = input.Close()
 		cancel()
 		stopNative()
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("start sandbox MCP bridge: %w", err)
+		return nil, nil, fmt.Errorf("start sandbox MCP bridge: %w", err)
 	}
 	var once sync.Once
 	var workers sync.WaitGroup
@@ -350,7 +385,6 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 		})
 	}
 	ready := make(chan bool, 1)
-	broker := mcpBroker{storeHome: store.Home, commonDir: task.CommonDir, set: set, native: native, thread: native.thread}
 	go func() {
 		defer close(done)
 		scanner := bufio.NewScanner(output)
@@ -403,12 +437,12 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 	case ok := <-ready:
 		if !ok {
 			stop()
-			return nil, fmt.Errorf("sandbox MCP bridge did not become ready")
+			return nil, nil, fmt.Errorf("sandbox MCP bridge did not become ready")
 		}
 	case <-time.After(30 * time.Second):
 		stop()
-		return nil, fmt.Errorf("sandbox MCP bridge startup timed out")
+		return nil, nil, fmt.Errorf("sandbox MCP bridge startup timed out")
 	}
-	fmt.Fprintf(os.Stderr, "Trusted MCP host bridge active for task %s: %v (MCP calls execute on the host)\n", task.ID, set.names)
-	return stop, nil
+	fmt.Fprintf(os.Stderr, "Trusted MCP host bridge active for task %s: %v (MCP calls execute on the host)\n", task.ID, readyNames)
+	return stop, unavailable, nil
 }
