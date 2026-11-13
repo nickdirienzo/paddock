@@ -175,6 +175,10 @@ can be granted; changes to their configuration require a new grant. Revocation
 with `paddock repo untrust PROJECT --mcp NAME` takes effect on the next call.
 Granting a server exposes its allowed tools and resources to that repository's
 agent; Paddock does not inspect the arguments of an allowed tool call.
+Paddock records the absolute host Codex executable when you grant an MCP server,
+so tasks started by background integrations do not depend on their host `PATH`.
+If Codex moves, run the trust command again from a shell that can find it, or
+set `PADDOCK_CODEX_BIN` to its new absolute path for that command.
 
 Normal `git` and `gh` commands run inside OpenShell as the mapped App bot. Tokens
 are not shared with the installation-wide poller transport. The host retains App

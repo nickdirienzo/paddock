@@ -232,7 +232,9 @@ func TestMCPNativeIntegration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	set := trustedMCPSet{home: home, config: config, names: []string{"trusted"}, grants: map[string]MCPTrust{"trusted": {}}}
+	set := trustedMCPSet{home: home, binary: path, config: config, names: []string{"trusted"}, grants: map[string]MCPTrust{"trusted": {}}}
+	t.Setenv("PADDOCK_CODEX_BIN", "")
+	t.Setenv("PATH", "/usr/bin:/bin")
 	native, stop, err := startNativeMCP(ctx, set, t.TempDir())
 	if err != nil {
 		t.Fatal(err)

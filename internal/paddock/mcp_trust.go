@@ -21,6 +21,7 @@ type MCPTrust struct {
 	URL        string `json:"url"`
 	CodexHome  string `json:"codex_home"`
 	ConfigHash string `json:"config_hash"`
+	CodexBin   string `json:"codex_bin,omitempty"`
 }
 
 type hostMCPConfig struct {
@@ -97,6 +98,10 @@ func (s *Store) SetRepoMCPTrust(ctx context.Context, nameOrPath string, names []
 		}
 	}
 	if trusted {
+		binary, err := executable("PADDOCK_CODEX_BIN", "codex")
+		if err != nil {
+			return "", fmt.Errorf("find host Codex for MCP trust: %w; set PADDOCK_CODEX_BIN to its absolute path", err)
+		}
 		home, err := hostCodexHome()
 		if err != nil {
 			return "", err
@@ -114,6 +119,7 @@ func (s *Store) SetRepoMCPTrust(ctx context.Context, nameOrPath string, names []
 			if err != nil {
 				return "", fmt.Errorf("MCP %q: %w", name, err)
 			}
+			grant.CodexBin = binary
 			grants[name] = grant
 		}
 	}
@@ -150,6 +156,7 @@ func (s *Store) SetRepoMCPTrust(ctx context.Context, nameOrPath string, names []
 
 type trustedMCPSet struct {
 	home   string
+	binary string
 	grants map[string]MCPTrust
 	config hostMCPConfig
 	names  []string
@@ -166,13 +173,19 @@ func loadTrustedMCPs(home, commonDir string) (trustedMCPSet, error) {
 	}
 	set.grants = data.TrustedMCPs[commonDir]
 	for name, grant := range set.grants {
-		if !aliasName.MatchString(name) || !filepath.IsAbs(grant.CodexHome) || len(grant.ConfigHash) != 64 {
+		if !aliasName.MatchString(name) || !filepath.IsAbs(grant.CodexHome) || len(grant.ConfigHash) != 64 || (grant.CodexBin != "" && !filepath.IsAbs(grant.CodexBin)) {
 			return set, fmt.Errorf("invalid trusted MCP reference")
 		}
 		if set.home != "" && set.home != grant.CodexHome {
 			return set, fmt.Errorf("trusted MCPs use different Codex homes; trust them again with the same CODEX_HOME")
 		}
 		set.home = grant.CodexHome
+		if grant.CodexBin != "" {
+			if set.binary != "" && set.binary != grant.CodexBin {
+				return set, fmt.Errorf("trusted MCPs use different host Codex executables; trust them again with the same PADDOCK_CODEX_BIN")
+			}
+			set.binary = grant.CodexBin
+		}
 		set.names = append(set.names, name)
 	}
 	if len(set.names) == 0 {
@@ -185,7 +198,8 @@ func loadTrustedMCPs(home, commonDir string) (trustedMCPSet, error) {
 	}
 	for _, name := range set.names {
 		current, err := fingerprintMCP(set.home, set.config.Servers[name])
-		if err != nil || current != set.grants[name] {
+		grant := set.grants[name]
+		if err != nil || current.URL != grant.URL || current.CodexHome != grant.CodexHome || current.ConfigHash != grant.ConfigHash {
 			return set, fmt.Errorf("trusted MCP %q changed; review the host configuration and run paddock repo trust REPO --mcp %s again", name, name)
 		}
 	}
