@@ -77,8 +77,10 @@ there is no fallback to personal host credentials. Inspect renewal with
 `openshell provider refresh status paddock-claude`.
 
 Claude's native interactive launch/resume and inbox delivery are supported in
-OpenShell. The image completes display/login onboarding because authentication
-comes from the provider. Claude keeps native tool approvals. For repositories
+OpenShell. Paddock starts and resumes Claude with `--model opus`, overriding a
+saved Sonnet selection for these tasks. The image completes display/login
+onboarding because authentication comes from the provider. Claude keeps native
+tool approvals. For repositories
 explicitly trusted with `paddock repo trust`, Paddock records workspace trust in
 the task's isolated Claude config before launch; other repositories receive the
 native workspace trust prompt.
