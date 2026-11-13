@@ -64,8 +64,11 @@ retried with the same ID. A crash or ambiguous delivery is `claimed` or
 before sending a new message.
 
 `output --json` reads the pinned OpenShell conversation without resuming it. It
-returns public assistant messages and a `turn_finished` event for each completed,
-failed, or interrupted native turn. It omits prompts, hidden reasoning, tool
+returns public assistant messages and a `turn_finished` event when native history
+records a terminal turn state. Codex reports `completed`, `failed`, or
+`interrupted`; Claude reports `completed` when its transcript records
+`turn_duration`. Paddock does not infer turn completion from a stopped process.
+It omits prompts, hidden reasoning, tool
 calls and results, and raw terminal output. A message has an ID, `turn_id`,
 `phase` (`commentary`, `partial_answer`, or `final_answer`), and `text`.
 Questions, progress, explanations, and communicated blockers are ordinary public
