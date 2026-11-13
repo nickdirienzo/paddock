@@ -168,7 +168,8 @@ size changes, control keys, native permissions, and the agent's exit status.
 Host MCP forwarding is unavailable because agent tool execution must remain
 inside OpenShell. Existing grants can be removed with `paddock repo untrust
 PROJECT --mcp NAME`. Tasks with remaining host MCP grants fail before agent
-launch. Configure MCP servers directly inside the OpenShell environment and
+launch with a recovery command; new host grants are rejected by the CLI.
+Configure MCP servers directly inside the OpenShell environment and
 its network policy for new work.
 
 Normal `git` and `gh` commands run inside OpenShell as the mapped App bot. Tokens

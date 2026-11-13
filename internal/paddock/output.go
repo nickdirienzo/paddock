@@ -191,6 +191,22 @@ type codexList[T any] struct {
 	NextCursor string `json:"nextCursor"`
 }
 
+type codexOutputTurn struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type codexOutputItem struct {
+	TurnID        string `json:"turnId"`
+	CompletedAtMs *int64 `json:"completedAtMs"`
+	Item          struct {
+		ID    string `json:"id"`
+		Type  string `json:"type"`
+		Phase string `json:"phase"`
+		Text  string `json:"text"`
+	} `json:"item"`
+}
+
 func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 	command := agentCommandContext(ctx, task, "app-server", "--stdio")
 	input, err := command.StdinPipe()
@@ -252,11 +268,7 @@ func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 	if thread.Thread.ID != task.Session.ConversationID || canonicalWorkspacePath(thread.Thread.Cwd) != canonicalWorkspacePath(task.Worktree) {
 		return nil, fmt.Errorf("saved Codex conversation does not match the task workspace")
 	}
-	type turn struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	turns := []turn{}
+	turns := []codexOutputTurn{}
 	requestID := 3
 	cursor := ""
 	for {
@@ -264,7 +276,7 @@ func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		var page codexList[turn]
+		var page codexList[codexOutputTurn]
 		if err := call(requestID, "thread/turns/list", params, &page); err != nil {
 			return nil, err
 		}
@@ -278,24 +290,14 @@ func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 		}
 		cursor = page.NextCursor
 	}
-	type item struct {
-		TurnID        string `json:"turnId"`
-		CompletedAtMs *int64 `json:"completedAtMs"`
-		Item          struct {
-			ID    string `json:"id"`
-			Type  string `json:"type"`
-			Phase string `json:"phase"`
-			Text  string `json:"text"`
-		} `json:"item"`
-	}
-	items := []item{}
+	items := []codexOutputItem{}
 	cursor = ""
 	for {
 		params := map[string]any{"threadId": task.Session.ConversationID, "sortDirection": "asc", "limit": 100}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		var page codexList[item]
+		var page codexList[codexOutputItem]
 		if err := call(requestID, "thread/items/list", params, &page); err != nil {
 			return nil, err
 		}
@@ -309,6 +311,10 @@ func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 		}
 		cursor = page.NextCursor
 	}
+	return assembleCodexOutput(task, turns, items)
+}
+
+func assembleCodexOutput(task Task, turns []codexOutputTurn, items []codexOutputItem) ([]OutputEvent, error) {
 	byTurn := map[string][]OutputEvent{}
 	for _, i := range items {
 		if i.Item.Type != "agentMessage" || i.CompletedAtMs == nil {
@@ -323,15 +329,23 @@ func codexOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
 		byTurn[i.TurnID] = append(byTurn[i.TurnID], publicMessage(i.Item.ID, i.TurnID, i.Item.Phase, i.Item.Text)...)
 	}
 	events := []OutputEvent{}
-	for _, turn := range turns {
+	for index, turn := range turns {
 		if turn.ID == "" {
 			return nil, fmt.Errorf("Codex turn has no stable native ID")
 		}
 		events = append(events, byTurn[turn.ID]...)
 		delete(byTurn, turn.ID)
 		switch turn.Status {
-		case "completed", "failed", "interrupted":
+		case "completed":
 			events = append(events, finishTurn(turn.ID, turn.ID, turn.Status))
+		case "failed", "interrupted":
+			// The interactive Codex runtime can retry an interrupted latest turn
+			// under the same ID and append its answer later. Publishing a terminal
+			// cursor now would place that answer before the cursor and lose it.
+			// A later turn or stopped session makes this state stable.
+			if index < len(turns)-1 || task.Session.EndedAt != "" {
+				events = append(events, finishTurn(turn.ID, turn.ID, turn.Status))
+			}
 		case "inProgress":
 		default:
 			return nil, fmt.Errorf("Codex returned an unknown turn status")

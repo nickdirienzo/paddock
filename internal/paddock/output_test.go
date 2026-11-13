@@ -131,3 +131,37 @@ done
 		}
 	}
 }
+
+func TestCodexInterruptedTurnCanRecoverWithoutLosingCursor(t *testing.T) {
+	task := Task{ID: "task", Session: Session{ConversationID: newConversationID()}}
+	completedAt := int64(1)
+	progress := codexOutputItem{TurnID: "turn", CompletedAtMs: &completedAt}
+	progress.Item.ID, progress.Item.Type, progress.Item.Phase, progress.Item.Text = "progress", "agentMessage", "commentary", "Checking"
+	answer := codexOutputItem{TurnID: "turn", CompletedAtMs: &completedAt}
+	answer.Item.ID, answer.Item.Type, answer.Item.Phase, answer.Item.Text = "answer", "agentMessage", "final_answer", "Done"
+	interrupted, err := assembleCodexOutput(task, []codexOutputTurn{{ID: "turn", Status: "interrupted"}}, []codexOutputItem{progress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := pageOutput(task, interrupted, "", 20)
+	if err != nil || len(first.Events) != 1 || first.Events[0].Text != "Checking" {
+		t.Fatalf("transient interruption was published: %+v, %v", first, err)
+	}
+	completed, err := assembleCodexOutput(task, []codexOutputTurn{{ID: "turn", Status: "completed"}}, []codexOutputItem{progress, answer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := pageOutput(task, completed, first.NextCursor, 20)
+	if err != nil || len(second.Events) != 2 || second.Events[0].Text != "Done" || second.Events[1].Type != "turn_finished" || second.Events[1].State != "completed" {
+		t.Fatalf("recovered answer was lost: %+v, %v", second, err)
+	}
+	stable, err := assembleCodexOutput(task, []codexOutputTurn{{ID: "turn", Status: "interrupted"}, {ID: "next", Status: "inProgress"}}, []codexOutputItem{progress})
+	if err != nil || len(stable) != 2 || stable[1].State != "interrupted" {
+		t.Fatalf("older interrupted turn was not published: %+v, %v", stable, err)
+	}
+	task.Session.EndedAt = now()
+	stable, err = assembleCodexOutput(task, []codexOutputTurn{{ID: "turn", Status: "failed"}}, []codexOutputItem{progress})
+	if err != nil || len(stable) != 2 || stable[1].State != "failed" {
+		t.Fatalf("stopped failed turn was not published: %+v, %v", stable, err)
+	}
+}
