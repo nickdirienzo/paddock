@@ -132,7 +132,7 @@ func nativeMCPEnvironment(set trustedMCPSet) []string {
 }
 
 func startNativeMCP(ctx context.Context, set trustedMCPSet, dir string) (*mcpNative, func(), error) {
-	path, err := executable("PADDOCK_CODEX_BIN", "codex")
+	path, err := trustedMCPBinary(set)
 	if err != nil {
 		return nil, nil, fmt.Errorf("trusted MCP bridge requires host Codex: %w", err)
 	}
@@ -206,4 +206,11 @@ func startNativeMCP(ctx context.Context, set trustedMCPSet, dir string) (*mcpNat
 	}
 	n.thread = started.Thread.ID
 	return n, stop, nil
+}
+
+func trustedMCPBinary(set trustedMCPSet) (string, error) {
+	if set.binary != "" {
+		return set.binary, nil
+	}
+	return executable("PADDOCK_CODEX_BIN", "codex")
 }

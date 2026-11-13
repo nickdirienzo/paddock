@@ -15,6 +15,11 @@ func mcpTrustFixture(t *testing.T) (*Store, string, string) {
 	repo := repoFixture(t)
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
+	binary := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PADDOCK_CODEX_BIN", binary)
 	config := `[mcp_servers.observe]
 url = "https://observe.example/mcp"
 http_headers = { Authorization = "Bearer host-only-secret" }
@@ -46,6 +51,9 @@ func TestMCPTrustScopedPinnedAndRevocable(t *testing.T) {
 	set, err := loadTrustedMCPs(s.Home, common)
 	if err != nil || len(set.names) != 1 || set.names[0] != "observe" {
 		t.Fatalf("%+v %v", set, err)
+	}
+	if set.binary != os.Getenv("PADDOCK_CODEX_BIN") {
+		t.Fatalf("host Codex path was not pinned: %q", set.binary)
 	}
 	if err = set.authorize(s.Home, common, "metabase"); err == nil {
 		t.Fatal("unselected server authorized")
@@ -104,6 +112,23 @@ func TestMCPTrustScopedPinnedAndRevocable(t *testing.T) {
 	}
 	if set, err = loadTrustedMCPs(s.Home, common); err != nil || len(set.names) != 0 {
 		t.Fatal("project trust silently restored revoked MCP grants", err)
+	}
+}
+
+func TestMCPTrustUsesPinnedCodexWithMinimalBackgroundPath(t *testing.T) {
+	s, _, _ := mcpTrustFixture(t)
+	common, err := s.SetRepoMCPTrust(context.Background(), "project", []string{"observe"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := loadTrustedMCPs(s.Home, common)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PADDOCK_CODEX_BIN", "")
+	if binary, err := trustedMCPBinary(set); err != nil || binary != set.binary {
+		t.Fatalf("background launch lost pinned host Codex: %q %v", binary, err)
 	}
 }
 
