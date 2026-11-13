@@ -45,6 +45,20 @@ for name in old: servers.pop(name,None)
 for name in payload['names']:
     if name in servers: raise RuntimeError('An unmanaged Claude MCP already uses a trusted server name')
 servers.update(payload['claude'])
+project_mcp=pathlib.Path(sys.argv[3])/'.mcp.json'
+if sys.argv[4]=='claude' and project_mcp.exists():
+    project_servers=json.loads(project_mcp.read_text()).get('mcpServers',{})
+    if not isinstance(project_servers,dict): raise RuntimeError('Invalid project MCP configuration')
+    if project_servers:
+        settings=pathlib.Path('/home/sandbox/.claude/settings.json')
+        values=json.loads(settings.read_text()) if settings.exists() else {}
+        disabled=values.get('disabledMcpjsonServers',[])
+        if not isinstance(disabled,list) or not all(isinstance(name,str) for name in disabled):
+            raise RuntimeError('Invalid Claude project MCP disable list')
+        values['disabledMcpjsonServers']=sorted(set(disabled)|set(project_servers))
+        settings.parent.mkdir(parents=True,exist_ok=True)
+        temp=settings.with_name(settings.name+'.paddock-tmp')
+        temp.write_text(json.dumps(values)); temp.chmod(0o600); temp.replace(settings)
 for config,content in ((codex,text),(claude,json.dumps(data))):
     config.parent.mkdir(parents=True,exist_ok=True)
     temp=config.with_name(config.name+'.paddock-tmp')
@@ -59,7 +73,7 @@ func installTrustedMCPs(ctx context.Context, task Task, names []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = sandboxOutput(ctx, task, "/usr/bin/python3", "-c", installSandboxMCP, string(payload), sandboxMCPClient)
+	_, err = sandboxOutput(ctx, task, "/usr/bin/python3", "-c", installSandboxMCP, string(payload), sandboxMCPClient, task.Worktree, task.Session.Agent)
 	return err
 }
 
