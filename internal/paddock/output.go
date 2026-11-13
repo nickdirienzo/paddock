@@ -28,7 +28,7 @@ type OutputEvent struct {
 type OutputPage struct {
 	TaskID     string        `json:"task_id"`
 	Events     []OutputEvent `json:"events"`
-	NextCursor string        `json:"next_cursor,omitempty"`
+	NextCursor string        `json:"next_cursor"`
 	HasMore    bool          `json:"has_more"`
 }
 
