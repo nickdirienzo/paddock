@@ -102,7 +102,9 @@ for installation details.
 
 ## Use the CLI
 
-Use `paddock tasks`, `paddock show`, and `paddock artifacts` to inspect agent work.
+Use `paddock tasks`, `paddock show`, `paddock output`, and `paddock artifacts`
+to inspect agent work. `paddock output TASK_ID --json` returns public agent
+messages and finished turns with a cursor for polling.
 The former host Team Principal is unavailable under the OpenShell isolation rule.
 
 For an interactive task form, run `paddock new`. Choose a repository and agent,

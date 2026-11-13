@@ -241,13 +241,14 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 | `paddock run <prompt\|->` | Persist a task with an authorized identity and profile, create its worktree, launch the agent in OpenShell, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
 | `paddock show <id>` | Show provenance, prompt, task and native turn state, pending access requests, terminal, and exit status. |
+| `paddock output <id> --after <cursor> --limit <n> --json` | Page through public agent messages and finished turns in the saved OpenShell conversation. |
 | `paddock artifacts <id>` | Report commits, workspace changes, and PRs for a task. |
 | `paddock message <id> <text>` | Send a native follow-up with an optional idempotency key. |
 | `paddock identity create\|show\|verify` | Create, inspect, and verify a named agent identity. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
-Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, and `show` accept `--json` for scripting. Prompts are passed as argument values, read from stdin with `-`, or loaded with `--prompt-file <path>`; they are never evaluated as shell code. Use `--` before a prompt that begins with a dash.
+Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, `show`, and `output` accept `--json` for scripting. Prompts are passed as argument values, read from stdin with `-`, or loaded with `--prompt-file <path>`; they are never evaluated as shell code. Use `--` before a prompt that begins with a dash.
 
 `run` and `delegate` accept `--agent codex|claude`,
 `--terminal auto|rex|screen`, `--repo <directory>`, `--base <ref>`,
@@ -451,7 +452,8 @@ Copyright 2026 Paddock contributors. Licensed under the [Apache License, Version
 
 ### Integration dispatch
 
-Use `paddock run --external-id`, `paddock message --external-id`, and
-`paddock artifacts --json` for deterministic integration dispatch. See
+Use `paddock run --external-id`, `paddock message --external-id`,
+`paddock output --json`, and `paddock artifacts --json` for deterministic
+integration dispatch and result retrieval. See
 [integration CLI](integrations.md). Model-backed orchestration is unavailable
 until its planner runs in OpenShell.
