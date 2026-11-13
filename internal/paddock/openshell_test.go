@@ -248,6 +248,20 @@ func TestOpenShellUsesOuterSandboxWithApprovals(t *testing.T) {
 		t.Fatal("host isolation changed")
 	}
 }
+
+func TestOpenShellClaudeStartsAndResumesOnOpus(t *testing.T) {
+	task := Task{Runtime: "openshell", Worktree: "/sandbox/worktree", OpenShell: &OpenShellTask{Config: OpenShellConfig{Binary: "/bin/echo"}}, Session: Session{Agent: "claude", AgentPath: "/usr/local/bin/claude"}}
+	for _, resume := range []bool{false, true} {
+		task.Session.Resume = resume
+		task.Session.ConversationID = "saved-conversation"
+		command := AgentCommand(task, "/host/state", "/host/paddock")
+		args := strings.Join(command.Args, " ")
+		if !strings.Contains(args, "/usr/local/bin/claude --model opus") {
+			t.Fatalf("Claude model was not pinned for resume=%t: %v", resume, command.Args)
+		}
+	}
+}
+
 func TestSandboxGCRequiresStoppedCompute(t *testing.T) {
 	s := openTestStore(t, t.TempDir())
 	task := taskFixture()

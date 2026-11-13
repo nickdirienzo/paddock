@@ -47,6 +47,9 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 			args = append(args, "--sandbox", "danger-full-access", "--ask-for-approval", "on-request")
 		}
 	}
+	if t.RuntimeName() == "openshell" && t.Session.Agent == "claude" {
+		args = append(args, "--model", "opus")
+	}
 	if t.Session.Agent == "codex" && t.Session.TrustProject {
 		// An inline TOML table preserves dots and quotes in the path. Codex's
 		// CLI dotted-key parser does not parse quoted path components.
