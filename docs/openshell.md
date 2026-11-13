@@ -165,12 +165,16 @@ size changes, control keys, native permissions, and the agent's exit status.
 
 ### Trusted MCP connections
 
-Host MCP forwarding is unavailable because agent tool execution must remain
-inside OpenShell. Existing grants can be removed with `paddock repo untrust
-PROJECT --mcp NAME`. Tasks with remaining host MCP grants fail before agent
-launch with a recovery command; new host grants are rejected by the CLI.
-Configure MCP servers directly inside the OpenShell environment and
-its network policy for new work.
+Use `paddock repo trust PROJECT --mcp NAME` to let tasks in that repository
+call a selected host Codex MCP connection. Paddock starts a separate host Codex
+app-server process for the task. The agent stays in OpenShell, but selected MCP
+calls and OAuth refresh execute on the host, outside OpenShell's network policy.
+The process does not run a model turn or expose shell tools to the workload.
+Credentials stay on the host. Only HTTPS MCP servers from the host Codex config
+can be granted; changes to their configuration require a new grant. Revocation
+with `paddock repo untrust PROJECT --mcp NAME` takes effect on the next call.
+Granting a server exposes its allowed tools and resources to that repository's
+agent; Paddock does not inspect the arguments of an allowed tool call.
 
 Normal `git` and `gh` commands run inside OpenShell as the mapped App bot. Tokens
 are not shared with the installation-wide poller transport. The host retains App

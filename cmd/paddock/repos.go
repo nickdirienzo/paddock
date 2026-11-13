@@ -17,7 +17,7 @@ func runRepo(args []string, out io.Writer) error {
 		return err
 	}
 	if len(pos) == 0 || opts["help"] != "" {
-		fmt.Fprint(out, "Usage: paddock repo add <name> <path> | list [--json] | remove <name> | trust <name-or-path> | untrust <name-or-path> [--mcp name,name]\n\nHost MCP forwarding is unavailable for OpenShell tasks.\nUse untrust --mcp to remove legacy host MCP grants without removing project trust.\nUntrust without --mcp revokes project trust and all MCP grants.\n")
+		fmt.Fprint(out, "Usage: paddock repo add <name> <path> | list [--json] | remove <name> | trust <name-or-path> | untrust <name-or-path> [--mcp name,name]\n\nTrust --mcp gives OpenShell tasks access to selected host Codex MCP connections. MCP calls execute on the host using its existing login.\nUntrust --mcp removes selected grants without removing project trust.\nUntrust without --mcp revokes project trust and all MCP grants.\n")
 		return nil
 	}
 	counts := map[string]int{"add": 3, "list": 1, "remove": 2, "trust": 2, "untrust": 2}
@@ -30,9 +30,6 @@ func runRepo(args []string, out io.Writer) error {
 	}
 	if opts["mcp"] != "" && pos[0] != "trust" && pos[0] != "untrust" {
 		return fmt.Errorf("--mcp is supported by repo trust and repo untrust")
-	}
-	if opts["mcp"] != "" && pos[0] == "trust" {
-		return fmt.Errorf("host MCP grants are unavailable for OpenShell tasks; configure MCP servers inside OpenShell instead")
 	}
 	home, err := paddock.StateHome()
 	if err != nil {
@@ -75,6 +72,9 @@ func runRepo(args []string, out io.Writer) error {
 				return err
 			}
 			fmt.Fprintf(out, "Host MCP trust: %t (%s): %s\n", trusted, path, strings.Join(names, ", "))
+			if trusted {
+				fmt.Fprintln(out, "Selected MCP calls execute on the host through Codex's existing login; credentials stay outside OpenShell.")
+			}
 			return nil
 		}
 		path, err := store.SetRepoTrust(context.Background(), pos[1], trusted)

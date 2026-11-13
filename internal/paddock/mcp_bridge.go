@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -292,9 +291,6 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(set.names) != 0 {
-		return nil, fmt.Errorf("trusted host MCP grants are unavailable for OpenShell tasks: %s; run paddock repo untrust REPO --mcp %s, then paddock resume %s", strings.Join(set.names, ", "), strings.Join(set.names, ","), task.ID)
-	}
 	setup, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 	err = installTrustedMCPs(setup, task, set.names)
 	cancelSetup()
@@ -413,5 +409,6 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 		stop()
 		return nil, fmt.Errorf("sandbox MCP bridge startup timed out")
 	}
+	fmt.Fprintf(os.Stderr, "Trusted MCP host bridge active for task %s: %v (MCP calls execute on the host)\n", task.ID, set.names)
 	return stop, nil
 }

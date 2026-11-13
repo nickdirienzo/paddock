@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/nickdirienzo/paddock/internal/paddock"
 )
 
 func TestRepoMCPTrustCLI(t *testing.T) {
@@ -28,17 +25,9 @@ func TestRepoMCPTrustCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := runRepo([]string{"trust", "project", "--mcp", "observe, metabase"}, &out); err == nil || !strings.Contains(err.Error(), "unavailable") {
-		t.Fatalf("accepted a launch-blocking host MCP grant: %s %v", out.String(), err)
+	if err := runRepo([]string{"trust", "project", "--mcp", "observe, metabase"}, &out); err != nil || !strings.Contains(out.String(), "execute on the host") {
+		t.Fatalf("host MCP grant failed or hid its execution boundary: %s %v", out.String(), err)
 	}
-	store, err := paddock.OpenStore(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.SetRepoMCPTrust(context.Background(), "project", []string{"observe", "metabase"}, true); err != nil {
-		t.Fatal(err)
-	}
-	store.Close()
 	read := func() map[string]map[string]any {
 		t.Helper()
 		b, err := os.ReadFile(filepath.Join(home, "repos.json"))
