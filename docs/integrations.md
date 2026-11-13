@@ -14,6 +14,8 @@ paddock run --repo project --identity remediation --profile investigation \
   'Investigate the reported issue'
 paddock tasks --json
 paddock show TASK_ID --json
+paddock output TASK_ID --limit 20 --json
+paddock output TASK_ID --after CURSOR --limit 20 --json
 paddock artifacts TASK_ID --json
 paddock message TASK_ID 'Follow-up detail' --external-id 'followup-789' --json
 ```
@@ -60,6 +62,33 @@ intent before delivery. A confirmed offline result is `pending` and can be
 retried with the same ID. A crash or ambiguous delivery is `claimed` or
 `uncertain` and is never replayed automatically; inspect the agent session
 before sending a new message.
+
+`output --json` reads the pinned OpenShell conversation without resuming it. It
+returns public assistant messages and a `turn_finished` event when native history
+records a terminal turn state. Codex reports `completed`, `failed`, or
+`interrupted`; Claude reports `completed` when its transcript records
+`turn_duration`. Paddock does not infer turn completion from a stopped process.
+It omits prompts, hidden reasoning, tool
+calls and results, and raw terminal output. A message has an ID, `turn_id`,
+`phase` (`commentary`, `partial_answer`, or `final_answer`), and `text`.
+Questions, progress, explanations, and communicated blockers are ordinary public
+messages; an integration can relay the text using its own delivery rules. A
+`turn_finished` event has `turn_id` and `state`; it is independent of whether
+the task's interactive process is still running. A failed or interrupted turn
+may have no final answer.
+
+The result is a JSON object with `task_id`, `events`, `next_cursor`, and
+`has_more`. `--limit` defaults to 20 and accepts 1–100 events. Each text event
+is at most 64 KiB; long messages are split into ordered `part` and `parts`
+events. Save `next_cursor` after delivering the page and pass it as `--after`
+on the next poll. An empty page preserves the supplied cursor. Event IDs and
+cursors remain stable within the saved native conversation, so a restarted
+integration can retrieve missed output. A cursor from another task or
+conversation, or one whose event has disappeared, is an error; integrations
+should surface that condition rather than silently replay history. History
+unavailable after sandbox removal is also an explicit error. Legacy host tasks
+have no supported output reader. `message --json` continues to report delivery
+only; pair its receipt with `output --json` to receive the agent's answer.
 
 Named identity and integration runs require OpenShell. The trusted local caller
 selects an allowed `investigation` or `implementation` profile. An unbacked

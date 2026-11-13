@@ -27,6 +27,7 @@ const help = `Paddock — a local control plane for coding agents
   paddock message <id> "message" [--external-id id] [--json]
   paddock tasks [--json]
   paddock show <id> [--json]
+  paddock output <id> [--after cursor] [--limit 1..100] [--json]
   paddock artifacts <id> [--json]
   paddock attach [<id>] [--client Rex-client-id]
   paddock shell-setup <id>
@@ -262,7 +263,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -355,6 +356,23 @@ func run(args []string, out io.Writer) error {
 		os.Exit(code)
 	}
 	switch command {
+	case "output":
+		limit := 20
+		if o["limit"] != "" {
+			limit, err = strconv.Atoi(o["limit"])
+			if err != nil || limit < 1 || limit > 100 {
+				return fmt.Errorf("--limit must be between 1 and 100")
+			}
+		}
+		t, e := store.Get(pos[0])
+		if e != nil {
+			return e
+		}
+		page, e := paddock.NativeOutput(ctx, t, o["after"], limit)
+		if e != nil {
+			return e
+		}
+		return emit(out, page)
 	case "artifacts":
 		t, e := store.Get(pos[0])
 		if e != nil {
