@@ -192,9 +192,14 @@ For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_l
 
 Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in either agent.
 
-Trusted host MCP connections are unavailable for agent tasks because tool calls
-must execute inside OpenShell. Remove existing grants with `paddock repo untrust
-project --mcp NAME` before resuming an affected task.
+Use `paddock repo trust project --mcp NAME` to give that repository's OpenShell
+tasks access to a selected host Codex MCP connection. MCP calls execute through
+a separate host Codex app-server process using its existing OAuth login. The
+agent cannot access the token. Paddock checks repository grants before each call;
+`paddock repo untrust project --mcp NAME` revokes access. The host process does
+not run a model turn, but its MCP calls execute outside OpenShell's network
+policy. Grants cover the server's allowed tools and resources; Paddock does not
+inspect allowed tool arguments.
 
 ### Remembering Codex hook decisions
 
