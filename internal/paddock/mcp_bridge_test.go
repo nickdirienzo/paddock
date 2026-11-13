@@ -47,13 +47,23 @@ func TestSandboxMCPInstallPreservesConfigAndRemovesRevokedEntries(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(home, ".claude", ".claude.json"), []byte(`{"mcpServers":{"oshell-native":{"command":"/usr/local/bin/native-mcp"}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"permissions":{"defaultMode":"default"},"disabledMcpjsonServers":["already-disabled"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(dir, "worktree")
+	if err := os.MkdirAll(worktree, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".mcp.json"), []byte(`{"mcpServers":{"playwright":{"command":"npx"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	installer := strings.ReplaceAll(strings.ReplaceAll(installSandboxMCP, "/sandbox/.paddock", root), "/home/sandbox", home)
 	for _, names := range [][]string{{"observe", "metabase"}, {"metabase"}, {}} {
 		payload, err := sandboxMCPConfiguration(names)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if b, err := exec.Command(python, "-c", installer, string(payload), sandboxMCPClient).CombinedOutput(); err != nil {
+		if b, err := exec.Command(python, "-c", installer, string(payload), sandboxMCPClient, worktree, "claude").CombinedOutput(); err != nil {
 			t.Fatalf("install: %s %v", b, err)
 		}
 		b, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
@@ -87,6 +97,17 @@ func TestSandboxMCPInstallPreservesConfigAndRemovesRevokedEntries(t *testing.T) 
 		}
 		if native, ok := claude.Servers["oshell-native"].(map[string]any); !ok || native["command"] != "/usr/local/bin/native-mcp" {
 			t.Fatal("OpenShell MCP server was changed")
+		}
+		b, err = os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings struct {
+			Disabled    []string       `json:"disabledMcpjsonServers"`
+			Permissions map[string]any `json:"permissions"`
+		}
+		if json.Unmarshal(b, &settings) != nil || strings.Join(settings.Disabled, ",") != "already-disabled,playwright" || settings.Permissions["defaultMode"] != "default" {
+			t.Fatal("Claude project MCP opt-out did not preserve existing settings")
 		}
 	}
 }
