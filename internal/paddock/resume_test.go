@@ -22,6 +22,9 @@ func TestOnlyConfirmedInitialMCPFailureCanReplayAssignment(t *testing.T) {
 		{"host MCP grant blocked before first agent start", func(t *Task) {
 			t.Error = "trusted host MCP tools are unavailable; LLM tool execution requires OpenShell"
 		}, true},
+		{"actionable host MCP grant error before first agent start", func(t *Task) {
+			t.Error = "trusted host MCP grants are unavailable for OpenShell tasks: observe, metabase; run paddock repo untrust REPO --mcp observe,metabase, then paddock resume task"
+		}, true},
 		{"saved conversation must resume", func(t *Task) { t.Session.ConversationID = "saved-conversation" }, false},
 		{"previous resume must not replay", func(t *Task) { t.Session.Resume = true }, false},
 		{"missing history alone is insufficient", func(t *Task) { t.Error = "exit status 1" }, false},

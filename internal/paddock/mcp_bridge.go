@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -292,7 +293,7 @@ func startTrustedMCPBridge(store *Store, task Task) (func(), error) {
 		return nil, err
 	}
 	if len(set.names) != 0 {
-		return nil, fmt.Errorf("trusted host MCP tools are unavailable; LLM tool execution requires OpenShell")
+		return nil, fmt.Errorf("trusted host MCP grants are unavailable for OpenShell tasks: %s; run paddock repo untrust REPO --mcp %s, then paddock resume %s", strings.Join(set.names, ", "), strings.Join(set.names, ","), task.ID)
 	}
 	setup, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 	err = installTrustedMCPs(setup, task, set.names)

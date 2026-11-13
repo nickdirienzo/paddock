@@ -147,6 +147,7 @@ func canRetryInitialMCPStartup(t Task) bool {
 		t.Session.Generation > 0 && !t.Session.Resume && t.Session.ConversationID == "" &&
 		t.Session.ExitCode != nil && *t.Session.ExitCode == 1 &&
 		(strings.HasPrefix(t.Error, "trusted MCP bridge requires host Codex:") ||
+			strings.HasPrefix(t.Error, "trusted host MCP grants are unavailable for OpenShell tasks:") ||
 			t.Error == "trusted host MCP tools are unavailable; LLM tool execution requires OpenShell")
 }
 

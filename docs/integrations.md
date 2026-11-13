@@ -75,7 +75,10 @@ Questions, progress, explanations, and communicated blockers are ordinary public
 messages; an integration can relay the text using its own delivery rules. A
 `turn_finished` event has `turn_id` and `state`; it is independent of whether
 the task's interactive process is still running. A failed or interrupted turn
-may have no final answer.
+may have no final answer. Codex can retry its latest interrupted or failed turn
+under the same ID. Paddock publishes that terminal event only after a later
+turn starts or the session stops, so a saved cursor cannot skip a recovered
+answer.
 
 The result is a JSON object with `task_id`, `events`, `next_cursor`, and
 `has_more`. `--limit` defaults to 20 and accepts 1–100 events. Each text event
