@@ -29,9 +29,14 @@ func (s *Store) ClaimMessage(taskID, caller, externalID, body string) (MessageRe
 	if externalID == "" || len(externalID) > 256 || caller == "" {
 		return MessageReceipt{}, false, fmt.Errorf("invalid message idempotency key")
 	}
+	release, err := s.taskLease(taskID, "operation")
+	if err != nil {
+		return MessageReceipt{}, false, fmt.Errorf("%w: %v", ErrAgentOffline, err)
+	}
+	defer release()
 	var receipt MessageReceipt
 	claimed := false
-	err := s.withLock(func() error {
+	err = s.withLock(func() error {
 		if _, err := s.read(taskID); err != nil {
 			return err
 		}

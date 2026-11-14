@@ -41,7 +41,7 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {
 		// OpenShell is the isolation boundary; nested Bubblewrap cannot create
 		// namespaces here. Keep native approval decisions enabled.
-		args = append(args, "--remote", "unix:///home/sandbox/.codex/app-server-control/app-server-control.sock")
+		args = append(args, "--remote", codexControlEndpoint(t))
 		// Remote resume restores the saved permissions and rejects overrides.
 		if !t.Session.Resume {
 			args = append(args, "--sandbox", "danger-full-access", "--ask-for-approval", "on-request")
@@ -280,6 +280,15 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 			message += "; task operation still active; sandbox retained"
 			code = 1
 		} else {
+			// A runtime proof, recorded before stopping its sandbox, survives a
+			// supervisor/poller restart. Transport exit alone is insufficient.
+			if verifiedIdleExit(ctx, t) {
+				t.Idle.DrainConfirmed, t.Idle.Phase = true, "draining"
+				if e := (Service{Store: store}).saveIdle(t, *t.Idle); e != nil {
+					message += "; " + e.Error()
+					code = 1
+				}
+			}
 			if e := stopCompletedSandbox(ctx, t); e != nil {
 				message += "; " + e.Error()
 				code = 1

@@ -22,7 +22,7 @@ const help = `Paddock — a local control plane for coding agents
   paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
                            [--identity name] [--profile investigation|implementation]
                            [--requester id] [--requester-source service] [--external-id id] [--context-file JSON]
-                           [--runtime openshell] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
+                           [--idle-ttl duration] [--runtime openshell] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
   paddock message <id> "message" [--external-id id] [--json]
   paddock tasks [--json]
@@ -52,6 +52,7 @@ Task IDs accept unique prefixes. State: PADDOCK_HOME or ~/.local/state/paddock.
 Bare attach opens a host shell tab. Attach with an ID reconnects to that agent.
 Run opens its Rex session automatically; --detach or --json keeps it in the background.
 --repo accepts a registered name, a working-tree path, or a bare-repository path.
+--idle-ttl requires a positive duration, e.g. 24h; omitted by default. Children opt in separately.
 Use - to read a multiline prompt from stdin until EOF, or --prompt-file to read a file.
 `
 
@@ -199,6 +200,9 @@ func printTask(w io.Writer, t paddock.Task) {
 	if t.Session.ConversationID != "" {
 		fmt.Fprintln(w, "Conversation:", t.Session.ConversationID)
 	}
+	if t.IdleTTL != "" {
+		fmt.Fprintln(w, "Idle TTL:", t.IdleTTL)
+	}
 	if t.LastActivityAt != "" {
 		fmt.Fprintln(w, "Last activity:", t.LastActivityAt)
 	}
@@ -263,7 +267,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -368,7 +372,7 @@ func run(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
-		page, e := paddock.NativeOutput(ctx, t, o["after"], limit)
+		page, e := service.Output(ctx, t, o["after"], limit)
 		if e != nil {
 			return e
 		}
@@ -410,7 +414,7 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Profile: o["profile"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
+		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, IdleTTL: o["idle-ttl"], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Profile: o["profile"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
 		if err != nil {
 			return err
 		}

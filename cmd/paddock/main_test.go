@@ -127,3 +127,21 @@ func TestSkillGuideDoesNotNeedRepositoryOrState(t *testing.T) {
 		}
 	}
 }
+
+func TestIdleTTLCLIContract(t *testing.T) {
+	for _, command := range []string{"run", "delegate"} {
+		// Invalid TTL reaches validation rather than being an unknown CLI option.
+		args := []string{command, "work", "--idle-ttl", "0s"}
+		if command == "delegate" {
+			args = append(args, "--parent", "missing")
+		}
+		t.Setenv("PADDOCK_HOME", t.TempDir())
+		var output bytes.Buffer
+		if err := run(args, &output); err == nil || !strings.Contains(err.Error(), "positive duration") {
+			t.Fatal(command, err)
+		}
+	}
+	if !strings.Contains(help, "--idle-ttl") || !strings.Contains(help, "omitted by default") {
+		t.Fatal("missing TTL help")
+	}
+}

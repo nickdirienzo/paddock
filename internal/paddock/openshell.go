@@ -162,6 +162,9 @@ func sandboxExec(ctx context.Context, t Task, tty bool, args ...string) *exec.Cm
 	for _, v := range []string{"TERM=xterm-256color", "HOME=/home/sandbox", "PATH=/sandbox/.paddock/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME=/home/sandbox/.codex", "CLAUDE_CONFIG_DIR=/home/sandbox/.claude", "PADDOCK_TASK_ID=" + t.ID, "PADDOCK_CONTROL_DIR=" + agentControlDir(t), "GOCACHE=/sandbox/go-cache", "GOPATH=/sandbox/go-path"} {
 		flags = append(flags, "--env", v)
 	}
+	if t.IdleTTL != "" {
+		flags = append(flags, "--env", "PADDOCK_IDLE_TTL="+t.IdleTTL)
+	}
 	if t.OpenShell.Config.CodexAccountID != "" {
 		flags = append(flags, "--env", "CODEX_ACCOUNT_ID="+t.OpenShell.Config.CodexAccountID)
 	}
@@ -288,7 +291,7 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 	} else {
 		remote = ""
 	}
-	t = Task{ID: id, Runtime: "openshell", Provenance: o.provenance, OpenShell: &OpenShellTask{Config: c, Name: name, Provider: provider, Repository: remote, Identity: binding, GitAuthorEmail: mail, GitAuthorName: author}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
+	t = Task{ID: id, IdleTTL: o.IdleTTL, Runtime: "openshell", Provenance: o.provenance, OpenShell: &OpenShellTask{Config: c, Name: name, Provider: provider, Repository: remote, Identity: binding, GitAuthorEmail: mail, GitAuthorName: author}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
 	t.OpenShell.AgentProxy, e = sandboxAgentProxy(s.Store.Home, c.Binary, o.Agent)
 	if e != nil {
 		return t, e
@@ -705,8 +708,14 @@ func stopCompletedSandbox(ctx context.Context, t Task) error {
 		return fmt.Errorf("remote agent exit is unconfirmed; sandbox retained running")
 	}
 	if t.Session.Agent == "codex" {
-		if _, e = sandboxOutput(ctx, t, "/usr/local/bin/paddock-codex-state", "idle", t.Session.ConversationID); e != nil {
-			return e
+		if t.Idle != nil && (t.Idle.Phase == "releasing" || t.Idle.Phase == "draining") {
+			if !verifiedIdleExit(ctx, t) {
+				return fmt.Errorf("native idle drain is unconfirmed; sandbox retained")
+			}
+		} else {
+			if _, e = sandboxOutput(ctx, t, "/usr/local/bin/paddock-codex-state", "idle", t.Session.ConversationID); e != nil {
+				return e
+			}
 		}
 	}
 	_, e = t.OpenShell.Config.call(ctx, "sandbox", "stop", t.OpenShell.Name)

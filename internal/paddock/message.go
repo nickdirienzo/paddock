@@ -32,6 +32,9 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	if err != nil {
 		return "", err
 	}
+	if task.Idle != nil && (task.Idle.Phase == "releasing" || task.Idle.Phase == "draining") {
+		return "", fmt.Errorf("%w: native idle release is being reconciled; retry after task stops", ErrAgentOffline)
+	}
 	if task.RuntimeName() != "openshell" {
 		return "", fmt.Errorf("%w: host agent task %s cannot receive messages; LLM execution requires OpenShell", ErrAgentOffline, task.ID)
 	}
@@ -74,7 +77,7 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	}
 	queueArgs := []string{"queue", "--thread", thread, "--message", body}
 	if task.RuntimeName() == "openshell" {
-		queueArgs = append(queueArgs, "--remote", "unix:///home/sandbox/.codex/app-server-control/app-server-control.sock")
+		queueArgs = append(queueArgs, "--remote", codexControlEndpoint(task))
 	}
 	command := agentCommandContext(ctx, task, queueArgs...)
 	if err = s.Store.TouchActivity(task.ID); err != nil {

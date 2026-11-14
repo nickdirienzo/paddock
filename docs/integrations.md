@@ -10,7 +10,7 @@ account and create its own named Paddock identity.
 paddock identity create remediation --profiles investigation,implementation
 paddock run --repo project --identity remediation --profile investigation \
   --requester 'user-123' --requester-source 'incident-service' \
-  --external-id 'case-456' --context-file context.json --json --detach \
+  --external-id 'case-456' --context-file context.json --idle-ttl 24h --json --detach \
   'Investigate the reported issue'
 paddock tasks --json
 paddock show TASK_ID --json
@@ -106,3 +106,59 @@ cannot choose a broader profile.
 
 The CLI contains no application-specific requester interpretation. Integrations
 must authenticate their own users and authorize requests before invoking it.
+
+## Per-task idle TTL contract
+
+An integration opts in at dispatch with `run --idle-ttl 24h`; omit the option
+for unlimited interactive lifetime. This is generic policy, independent of
+requester source. Durations must be positive Go durations, and JSON contains the
+canonical `idle_ttl: "24h0m0s"`. The policy survives service restarts and native
+resume. Delegated children opt in separately; they do not inherit it. Repeated
+external-ID dispatches must supply the same TTL, including omission for a task
+created without one. A changed/omitted policy is an error and never refreshes a
+timer or changes the existing task.
+
+`run --json`, `tasks --json` and `show --json` expose the task's `idle` checkpoint
+when available:
+
+```json
+{
+  "idle_ttl": "24h0m0s",
+  "idle": {
+    "generation": 1,
+    "phase": "idle",
+    "turn_id": "native-turn-id",
+    "epoch": "opaque-runtime-epoch",
+    "since": "2026-11-13T12:00:00Z",
+    "deadline": "2026-11-14T12:00:00Z"
+  }
+}
+```
+
+`idle` can be absent before the poller's first check. `phase` is `waiting`
+(no confirmed safe completed turn), `idle` (countdown established), `releasing`
+(durable intent with an unconfirmed response), `draining` (native release
+accepted), `expired` (stopped and pane cleanup complete), or `unsupported`
+(policy retained without automatic shutdown). `error` describes why Paddock
+retained a session. `drain_confirmed` records verified owner exit;
+`pane_closed` records cleanup. Treat `epoch` as opaque, and compare generation
+when reconciling observations. `since` and `deadline` are RFC3339 timestamps;
+policy and observation fields are read-only. Polling never extends the deadline.
+
+Expiry requires confirmed native completion and live safety checks; active work,
+approval/input waits, pending delivery and unknown states retain the session.
+The native conversation and task ID remain stable. After expiry,
+`status: "stopped"` and `session.last_turn` retain the completion state, and
+`output --json` continues serving stable event IDs/cursors from the saved public
+output checkpoint. A later `message TASK_ID 'Follow-up' --external-id ... --json`
+resumes that same conversation and delivers only the follow-up. The existing
+message receipt contract is unchanged. An operation/release collision is offline
+and retryable with the same `pending` external ID after cleanup; uncertain
+outcomes must still be inspected. If operation-lock contention prevents the
+initial message claim, the command fails before producing a receipt; retry the
+same external ID. Once a receipt exists, confirmed offline outcomes are `pending`.
+
+Automatic enforcement currently supports qualified OpenShell Codex runtimes.
+Claude TTL tasks report `unsupported` and remain running. Updated images and the
+v8 runtime poller are required; Paddock does not install them or restart services
+automatically. See [verified shutdown, recovery and limitations](lifecycle.md#opt-in-idle-process-expiry).
