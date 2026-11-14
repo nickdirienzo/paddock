@@ -79,7 +79,7 @@ A plain directory named `project` next to `project.git` is not automatically a c
 
 ### Interactive task launcher
 
-`paddock new` opens a terminal form with a repository picker, agent selector,
+`paddock new` opens a terminal form with repository, agent, and runtime selectors,
 multiline prompt, and Start task button. Registered repositories are listed by
 name; the current project is preselected when available. **Other repository…**
 accepts a registered name or a path, including `~/` and bare repositories.
@@ -97,15 +97,18 @@ focused terminal's working directory when Rex can report it. It passes the
 invoking Rex client's ID so the task opens in the same app. Enable Rex's Remote
 Control setting to allow session selection.
 
-Use arrows to choose a repository or agent, Tab / Shift-Tab to move between
+Use arrows to choose a repository, agent, or runtime, Tab / Shift-Tab to move between
 fields, Enter for a newline in the prompt, and Escape or Ctrl-C to cancel. Both
-Codex and Claude Code are shown in the agent list; the configured launcher selects the runtime. Selecting **Cancel** or pressing
+Codex and Claude Code are shown in the agent list. **Configured runtime** uses the
+launcher or runtime default; **OpenShell** and **Host (local)** override it for this
+task. Selecting **Cancel** or pressing
 Escape or Ctrl-C creates no task. Launch errors remain visible until
 dismissed. If session selection fails after creation, the launcher shows the
 existing task's attach command; it does not launch again.
 
 `new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
-`--client`. `--runtime` accepts only `openshell`. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
+`--client`, `--identity`, `--launcher`, and `--codex-tui`. `--runtime` accepts
+`openshell` or `host` and preselects that runtime in the form. The Rex action explicitly uses Rex; a direct `paddock new` uses the same
 terminal selection as `run`. Use `run` for scripts and pipelines.
 
 Setup records the executable's absolute path. Install Paddock at its stable
