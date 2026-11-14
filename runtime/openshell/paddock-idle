@@ -1,0 +1,302 @@
+#!/usr/bin/python3
+"""Opt-in Codex admission fence. Native approvals and RPC frames pass unchanged.
+
+Only this gateway admits Paddock/TUI work for a TTL launch. Expiry closes its
+admission gate, verifies the live owner and epoch, then requests *graceful-only*
+native drain. SIGHUP is repeatable; SIGTERM/daemon-stop can force a second drain
+and MUST NOT be used. No transcript read authorizes killing a native process.
+"""
+import asyncio
+import json
+import os
+import pathlib
+import re
+import select
+import signal
+import socket
+import struct
+import sys
+import uuid
+
+# These reads do not represent new work. Everything else invalidates idle,
+# including unknown future RPCs. Responses to server requests also invalidate it.
+READS = frozenset(('initialize', 'initialized', 'thread/read', 'thread/list',
+    'thread/loaded/list', 'thread/turns/list', 'thread/items/list',
+    'thread/items/read', 'thread/queue/list', 'thread/goal/get',
+    'thread/backgroundTerminals/list', 'model/list', 'config/read',
+    'configRequirements/read', 'mcpServerStatus/list', 'account/read',
+    'account/rateLimits/read', 'remoteControl/status/read'))
+QUALIFIED = frozenset(('0.159.2', '0.166.0'))
+
+
+class UnsafeIdle(ValueError):
+    """A static diagnostic, safe to return without native RPC/prompt content."""
+
+
+class Fence:
+    def __init__(self, root, generation, native, pidfd=None, owner_pid=None):
+        self.root = pathlib.Path(root)
+        self.generation = generation
+        self.native = native
+        self.pidfd = pidfd
+        self.owner_pid = owner_pid
+        self.epoch = str(uuid.uuid4())
+        self.gate = asyncio.Lock()
+        self.pending = set()
+        self.requests = set()
+        self.uncertain = False
+        self.draining = False
+
+    def activity(self):
+        self.epoch = str(uuid.uuid4())
+
+    def client(self, client, frame):
+        if frame.get('method') not in READS:
+            self.activity()
+        if 'id' in frame:
+            if 'method' in frame:
+                self.pending.add((client, str(frame['id'])))
+            else:
+                self.requests.discard((client, str(frame['id'])))
+
+    def server(self, client, frame):
+        if 'id' in frame:
+            key = (client, str(frame['id']))
+            if 'method' in frame:
+                self.requests.add(key)
+                self.activity()  # approval/input request; never answer it here
+            else:
+                self.pending.discard(key)
+        method = frame.get('method', '')
+        if method == 'turn/started' or (method == 'thread/status/changed' and
+                frame.get('params', {}).get('status', {}).get('type') != 'idle'):
+            self.activity()
+        if method == 'turn/completed':
+            self.activity()
+
+    def connect(self):
+        from websockets.legacy.client import unix_connect
+        return unix_connect(self.native, max_size=32 << 20, open_timeout=10)
+
+    def verify_owner(self, ws):
+        if self.owner_pid is None:
+            return
+        peer = ws.transport.get_extra_info('socket')
+        pid, uid, _gid = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if pid != self.owner_pid or uid != os.getuid() or (self.pidfd is not None and
+                select.select([self.pidfd], [], [], 0)[0]):
+            raise UnsafeIdle('native owner changed')
+
+    async def probe(self, thread, cwd):
+        async with self.connect() as ws:
+            self.verify_owner(ws)
+            seq = 0
+
+            async def call(method, params):
+                nonlocal seq
+                seq += 1
+                await ws.send(json.dumps({'id': seq, 'method': method, 'params': params}))
+                for _ in range(10000):
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                    if frame.get('id') == seq:
+                        if 'error' in frame:
+                            raise UnsafeIdle('native RPC rejected: ' + method)
+                        return frame['result']
+                raise UnsafeIdle('native RPC did not respond')
+
+            init = await call('initialize', {'clientInfo': {'name': 'paddock-idle', 'version': '1'},
+                                           'capabilities': {'experimentalApi': True}})
+            versions = re.findall(r'\b0\.\d+\.\d+\b', init['userAgent'])
+            if not any(v in QUALIFIED for v in versions):
+                raise UnsafeIdle('unqualified native drain version')
+            await ws.send(json.dumps({'method': 'initialized'}))
+            loaded = await call('thread/loaded/list', {'limit': 100})
+            if loaded.get('nextCursor') or thread not in loaded['data']:
+                raise UnsafeIdle('native owner not loaded or list incomplete')
+            latest = None
+            for identity in loaded['data']:
+                meta = (await call('thread/read', {'threadId': identity,
+                                                 'includeTurns': False}))['thread']
+                if meta['id'] != identity or meta['status']['type'] != 'idle':
+                    raise UnsafeIdle('native work active, blocked, or unknown')
+                terminals = await call('thread/backgroundTerminals/list', {'threadId': identity})
+                if terminals.get('data') != [] or terminals.get('nextCursor'):
+                    raise UnsafeIdle('background work or unknown terminal state')
+                if not meta.get('ephemeral', False):
+                    # Native ephemeral helpers (e.g. TUI title generation)
+                    # structurally cannot have persisted goals or queue entries.
+                    # They must still pass live idle and background-work checks.
+                    goal = (await call('thread/goal/get', {'threadId': identity}))['goal']
+                    if goal is not None and goal['status'] not in ('complete', 'paused'):
+                        raise UnsafeIdle('native goal may continue')
+                    queue = await call('thread/queue/list', {'threadId': identity, 'limit': 1})
+                    if queue['data'] or queue.get('nextCursor'):
+                        raise UnsafeIdle('native delivery pending')
+                if identity == thread:
+                    if meta.get('ephemeral') is True:
+                        raise UnsafeIdle('task conversation is not persistent')
+                    if os.path.realpath(meta['cwd']) != os.path.realpath(cwd):
+                        raise UnsafeIdle('native workspace differs')
+                    # Use native paging rather than materializing TUI history.
+                    turns = (await call('thread/turns/list', {'threadId': identity,
+                             'sortDirection': 'desc', 'itemsView': 'notLoaded', 'limit': 1}))['data']
+                    if not turns or turns[0]['status'] != 'completed' or not turns[0]['id']:
+                        raise UnsafeIdle('no confirmed completed turn')
+                    latest = turns[0]['id']
+            if latest is None:
+                raise UnsafeIdle('no completed native turn')
+            return latest
+
+    async def inspect(self, request):
+        if request['generation'] != self.generation:
+            raise UnsafeIdle('stale launch generation')
+        if self.draining:
+            return {'state': 'draining', 'epoch': self.epoch}
+        async with self.gate:
+            epoch = self.epoch
+            if self.uncertain or self.pending or self.requests:
+                raise UnsafeIdle('native delivery or input outstanding')
+            turn = await self.probe(request['thread'], request['cwd'])
+            if epoch != self.epoch or self.pending or self.requests or self.uncertain:
+                raise UnsafeIdle('activity during native inspection')
+            if request['op'] == 'expire':
+                if request['epoch'] != epoch or request['turn_id'] != turn or self.pidfd is None:
+                    raise UnsafeIdle('idle checkpoint changed or owner unverified')
+                # No await between final epoch check, admission closure and native
+                # signal. The owner fences its own admitted/internal work too.
+                self.draining = True
+                marker = {'generation': self.generation, 'thread': request['thread'],
+                          'turn_id': turn, 'epoch': epoch}
+                self.save('idle-drain.json', marker)  # durable intent before signal
+                try:
+                    signal.pidfd_send_signal(self.pidfd, signal.SIGHUP)
+                except ProcessLookupError:
+                    # A natural exit between inspection and the signal is safe
+                    # only when the pinned peer's death is already confirmed.
+                    if not select.select([self.pidfd], [], [], 0)[0]:
+                        raise
+                asyncio.create_task(self.confirm_exit(marker))
+                return {'state': 'draining', 'epoch': epoch, 'turn_id': turn}
+            return {'state': 'completed', 'epoch': epoch, 'turn_id': turn}
+
+    def save(self, name, value):
+        path = self.root / name
+        temporary = path.with_suffix('.tmp')
+        with open(temporary, 'w') as stream:
+            json.dump(value, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        fd = os.open(self.root, os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    async def confirm_exit(self, marker):
+        while not select.select([self.pidfd], [], [], 0)[0]:
+            await asyncio.sleep(0.1)
+        self.save('idle-stopped.json', marker)
+
+    async def proxy(self, downstream, _path):
+        identity = str(uuid.uuid4())
+        try:
+            async with self.connect() as upstream:
+                self.verify_owner(upstream)
+                async def forward():
+                    async for message in downstream:
+                        frame = json.loads(message)
+                        # Register work BEFORE waiting for the gate: an incoming
+                        # request during inspection invalidates that checkpoint.
+                        self.client(identity, frame)
+                        async with self.gate:
+                            if self.draining:
+                                if 'id' in frame:
+                                    await downstream.send(json.dumps({'id': frame['id'], 'error': {
+                                        'code': -32000, 'message': 'Paddock idle release; resume this conversation'}}))
+                                return
+                            await upstream.send(message)
+
+                async def backward():
+                    async for message in upstream:
+                        self.server(identity, json.loads(message))
+                        await downstream.send(message)
+
+                tasks = [asyncio.create_task(forward()), asyncio.create_task(backward())]
+                try:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception:
+            # A dropped link with an admitted request is not evidence of idle.
+            self.uncertain = True
+        finally:
+            if any(key[0] == identity for key in self.pending | self.requests):
+                self.uncertain = True
+            await downstream.close()
+
+    async def control(self, reader, writer):
+        try:
+            request = json.loads(await asyncio.wait_for(reader.readline(), 5))
+            response = await self.inspect(request)
+        except UnsafeIdle as error:
+            response = {'state': 'unknown', 'error': str(error)}
+        except Exception:
+            response = {'state': 'unknown'}
+        writer.write((json.dumps(response) + '\n').encode())
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+
+async def serve(root, generation):
+    from websockets.legacy.server import unix_serve
+    root = pathlib.Path(root)
+    native = os.path.join(os.environ['CODEX_HOME'], 'app-server-control/app-server-control.sock')
+    # SO_PEERCRED identifies the live server; SO_PEERPIDFD pins that exact
+    # process without a PID lookup/reuse window.
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.connect(native)
+        pid, uid, _gid = struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if uid != os.getuid():
+            raise UnsafeIdle('native owner has another uid')
+        try:
+            pidfd = sock.getsockopt(socket.SOL_SOCKET, getattr(socket, 'SO_PEERPIDFD', 77))
+        except OSError:
+            pidfd = None  # unsupported kernel: retain this session conservatively
+        if pidfd is not None and select.select([pidfd], [], [], 0)[0]:
+            os.close(pidfd)
+            raise UnsafeIdle('native owner exited during binding')
+    fence = Fence(root, generation, native, pidfd, pid)
+    try:
+        for name in ('idle-rpc.sock', 'idle-control.sock', 'idle-ready.json', 'idle-drain.json', 'idle-stopped.json'):
+            (root / name).unlink(missing_ok=True)
+        async with unix_serve(fence.proxy, str(root / 'idle-rpc.sock'), max_size=32 << 20):
+            async with await asyncio.start_unix_server(fence.control, str(root / 'idle-control.sock'), limit=65536):
+                fence.save('idle-ready.json', {'generation': generation})
+                await asyncio.Future()
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
+
+
+def client(root, request):
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(30)
+        sock.connect(str(pathlib.Path(root) / 'idle-control.sock'))
+        sock.sendall((json.dumps(request) + '\n').encode())
+        with sock.makefile() as stream:
+            return json.loads(stream.readline())
+
+
+if __name__ == '__main__':
+    root = os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox')
+    if sys.argv[1] == 'serve':
+        asyncio.run(serve(root, int(sys.argv[2])))
+    else:
+        try:
+            print(json.dumps(client(root, json.load(sys.stdin))))
+        except Exception:
+            print(json.dumps({'state': 'unknown'}))

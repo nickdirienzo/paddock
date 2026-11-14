@@ -39,6 +39,13 @@ paddock show <task-id>
 paddock attach <task-id>
 ```
 
+Opt in to per-task process expiry with `run --idle-ttl 24h` (also supported by
+`delegate`). Omit it for no idle TTL. Positive Go durations are required. The
+countdown follows confirmed native turn completion; status polling does not
+extend it. Children opt in separately. See [lifecycle and supported
+runtimes](lifecycle.md#opt-in-idle-process-expiry) for native shutdown safety,
+recovery, and the conservative Claude limitation.
+
 For a multiline goal, pass `-`, paste the prompt, and press Ctrl-D to send EOF:
 
 ```sh
@@ -409,7 +416,7 @@ expired, safe worktrees. The default retention period is seven days after activi
 Configure it with `paddock lifecycle configure --worktree-ttl 168h`. Dirty/unpushed
 work, active processes, open PRs, pending work, and unknown check results prevent
 removal. Conversations and branch refs are retained. See [lifecycle and recovery](lifecycle.md)
-for artifact policy, recovery, and the current automatic-shutdown limitation.
+for artifact policy, recovery, and opt-in idle shutdown support and limitations.
 
 ### Git behavior
 

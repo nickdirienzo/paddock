@@ -45,6 +45,25 @@ if pathlib.Path(sys.argv[2]).name == 'codex':
         if result.returncode:
             sys.exit('Could not restore the native conversation in the OpenShell runtime.')
 
+gateway = None
+if os.environ.get('PADDOCK_IDLE_TTL') and pathlib.Path(sys.argv[2]).name == 'codex':
+    gateway = subprocess.Popen(['/usr/local/bin/paddock-idle', 'serve', sys.argv[1]],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ready = control / 'idle-ready.json'
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            if json.loads(ready.read_text())['generation'] == int(sys.argv[1]):
+                break
+        except (OSError, ValueError, KeyError):
+            pass
+        if gateway.poll() is not None or time.monotonic() > deadline:
+            if gateway.poll() is None:
+                gateway.terminate()
+                gateway.wait()
+            sys.exit('Idle TTL requires a verified native admission fence; rebuild the runtime image or inspect kernel support.')
+        time.sleep(0.05)
+
 marker = control / 'agent-exit.json'
 marker.unlink(missing_ok=True)
 agent_args = sys.argv[2:]
@@ -64,13 +83,33 @@ if claude:
     state.write_text(json.dumps({'pid': child.pid, 'conversation': session,
                                 'generation': int(sys.argv[1])}))
     state.chmod(0o600)
+frontend_stopped = False
 while True:
     try:
-        code = child.wait()
+        code = child.wait(timeout=0.2 if gateway else None)
+        if gateway:
+            # Native drain may disconnect the TUI before owner cleanup finishes.
+            # Keep the process lease until the pinned owner actually exits.
+            while (control / 'idle-drain.json').exists() and not (control / 'idle-stopped.json').exists():
+                if gateway.poll() is not None:
+                    sys.exit('Native idle drain is unconfirmed; sandbox retained.')
+                time.sleep(0.1)
+            if (control / 'idle-stopped.json').exists():
+                code = 0
         break
+    except subprocess.TimeoutExpired:
+        if gateway and not frontend_stopped and (control / 'idle-stopped.json').exists():
+            # The model runtime has exited behind a closed admission gate. This
+            # terminates only its disconnected TUI frontend, never model work.
+            child.terminate()
+            frontend_stopped = True
+        continue
     except KeyboardInterrupt:
         # The foreground process group receives the same interrupt.
         continue
+if gateway:
+    gateway.terminate()
+    gateway.wait()
 partial = marker.with_suffix('.tmp')
 partial.write_text(json.dumps({'generation': int(sys.argv[1]), 'code': code}))
 partial.replace(marker)

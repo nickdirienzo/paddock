@@ -29,6 +29,7 @@ type RunOptions struct {
 	Prompt, Parent, Agent, Backend, Repo, Base, ID            string
 	SignalID, RelatedTaskID, Runtime, Role                    string
 	Identity, Profile, Requester, RequesterSource, ExternalID string
+	IdleTTL                                                   string
 	Context                                                   map[string]string
 	provenance                                                TaskProvenance
 }
@@ -42,6 +43,11 @@ func ValidateStateHome(home, repo string) error {
 
 func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	var empty Task
+	var err error
+	o.IdleTTL, err = NormalizeIdleTTL(o.IdleTTL)
+	if err != nil {
+		return empty, err
+	}
 	if o.Parent != "" {
 		parent, err := s.Store.Get(o.Parent)
 		if err != nil {
@@ -96,7 +102,7 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 			if requestedAgent == "" {
 				requestedAgent = "codex"
 			}
-			if prior.Prompt != o.Prompt || (o.Identity != "" && prior.Provenance.Identity != o.Identity) || prior.Provenance.Profile != provenance.Profile || prior.Provenance.Requester != o.Requester || !maps.Equal(prior.Provenance.Context, o.Context) || prior.Session.Agent != requestedAgent ||
+			if prior.IdleTTL != o.IdleTTL || prior.Prompt != o.Prompt || (o.Identity != "" && prior.Provenance.Identity != o.Identity) || prior.Provenance.Profile != provenance.Profile || prior.Provenance.Requester != o.Requester || !maps.Equal(prior.Provenance.Context, o.Context) || prior.Session.Agent != requestedAgent ||
 				(o.Base != "" && o.Base != prior.Base) || (o.Parent != "" && o.Parent != prior.ParentID) || (o.Runtime != "" && o.Runtime != prior.RuntimeName()) || (o.Backend != "" && o.Backend != "auto" && o.Backend != prior.Session.Backend) || (o.Role != "" && o.Role != prior.Role) || (o.SignalID != "" && o.SignalID != prior.SignalID) || (o.RelatedTaskID != "" && o.RelatedTaskID != prior.RelatedTaskID) {
 				return prior, fmt.Errorf("external ID already belongs to task %s with different dispatch data", prior.ID)
 			}

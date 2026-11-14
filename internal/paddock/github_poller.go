@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 7 // v7 requires OpenShell-only routing and identity-aware task state.
+const githubPollerVersion = 8 // v8 reconciles opt-in native idle TTLs.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -265,6 +265,22 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 			}
 		}
 	}()
+	idled := make(chan struct{})
+	go func() {
+		defer close(idled)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			if err := g.Service.ReconcileIdle(ctx); err != nil && ctx.Err() == nil {
+				fmt.Fprintln(os.Stderr, "Idle lifecycle:", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 	accessed := make(chan struct{})
 	go func() {
 		defer close(accessed)
@@ -288,7 +304,7 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 			}
 		}
 	}()
-	defer func() { cancel(); <-stopped; <-renewed; <-accessed }()
+	defer func() { cancel(); <-stopped; <-renewed; <-accessed; <-idled }()
 	for ctx.Err() == nil {
 		// Bound a pass so a stalled API cannot prevent later polls forever.
 		pollCtx, pollCancel := context.WithTimeout(ctx, 10*time.Minute)

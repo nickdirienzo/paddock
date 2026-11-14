@@ -290,6 +290,12 @@ func (t terminal) Inspect(ctx context.Context, task Task) (Session, Observation)
 				}
 			}
 			if missing {
+				// Verified idle drain plus the saved generation proves this native
+				// owner is gone. Its removed block need not imply loss of a sibling
+				// agent merely because user-added panes remain in the same window.
+				if task.Idle != nil && task.Idle.DrainConfirmed && task.Idle.Generation == task.Session.Generation {
+					return s, Observation{State: "missing"}
+				}
 				if len(blocks.Blocks) != 0 {
 					if s.WindowID != "" {
 						state, stateErr := t.rex(ctx, "session", "inspect", s.ID, "--json")

@@ -117,7 +117,7 @@ func (s *Store) preparationActive(id string) (bool, error) {
 }
 
 func (s *Store) TouchActivity(id string) error {
-	return s.update(id, func(t *Task) error { t.LastActivityAt = now(); return nil })
+	return s.update(id, func(t *Task) error { t.LastActivityAt = now(); t.Idle = nil; return nil })
 }
 
 func (s Service) Resume(ctx context.Context, id string) (Task, error) {
@@ -155,6 +155,9 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	t, err := s.Store.Get(id)
 	if err != nil {
 		return t, err
+	}
+	if t.Idle != nil && (t.Idle.Phase == "releasing" || t.Idle.Phase == "draining") {
+		return t, fmt.Errorf("native idle release is being reconciled; retry after task stops")
 	}
 	if t.RuntimeName() != "openshell" {
 		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
@@ -227,6 +230,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	}
 	if err = s.Store.update(id, func(v *Task) error {
 		v.Session.Generation++
+		v.Idle = nil
 		v.Session.LastTurn = nil
 		v.Session.Resume = !retryInitial
 		v.Session.ResumeNotice = t.Session.ResumeNotice

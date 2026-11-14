@@ -95,30 +95,110 @@ that caches and uncommitted filesystem state were not restored. Ordinary warm
 resume leaves all files and build artifacts in place. Conversation history is not
 a filesystem backup.
 
-## Automatic process shutdown: not enabled
+## Opt-in idle process expiry
 
-New Rex panes close when the agent actually exits. Resuming older tasks closes only
-Paddock's already-exited pane, preserving user-added panes. Paddock never infers turn
-completion from terminal inactivity.
+```sh
+paddock run --repo project --agent codex --idle-ttl 24h --json --detach \
+  'Investigate the reported issue'
+```
 
-Investigation used Codex CLI 0.159.2, its shared daemon 0.166.0, and Claude Code
-2.1.286. Native resume was exercised for both agents after process exit, with the
-same conversation ID and recalled prior-turn context. Real Rex fixture tests cover
-the supervisor, foreground process, independent task exits, and pane closure.
+There is no idle TTL by default, including for existing tasks. `run` and
+`delegate` accept `--idle-ttl` as a positive Go duration (`24h`, `90m`, `1h30m`).
+Zero, negative, overflowing, unitless, and day-suffix durations are errors. The
+policy is saved as canonical `idle_ttl` (for example `24h0m0s`). It is independent
+of the seven-day workspace retention clock and never removes a branch, workspace,
+native conversation, or output history.
 
-Codex exposes `turn/completed` and status flags for approval/user-input waits, but
-the shared daemon does not necessarily own a Rex TUI's thread. A read-only live
-probe reported an existing TUI conversation as `notLoaded`; reading stored history
-does not establish current runtime safety. No verified atomic idle-and-release
-interface was found for these independently hosted TUIs. See the
-[Codex app-server protocol](https://developers.openai.com/codex/app-server).
+Children do **not** inherit a parent's TTL. Supply `delegate --idle-ttl` for each
+child that should expire; each child's timer and native owner are independent.
+A repeated dispatch using the same external ID must include the same effective
+TTL (equivalent spellings are accepted). Omitting or changing it is a dispatch
+conflict, never a policy update, launch, or timer refresh. No requester source has
+special treatment.
 
-Claude's `Stop` hook may be followed by continuation from another hook, and the
-transcript may not contain the final message yet. It is not a safe process-kill
-trigger. See [Claude's Stop hook](https://code.claude.com/docs/en/hooks#stop).
+The existing runtime poller checks opted-in tasks every five seconds; work across
+many tasks or slow native reads can delay enforcement. It starts a full countdown
+when it first confirms a completed native turn **and** live idle safety. It does
+not count from task creation, terminal silence, metadata updates, or status polls.
+The same completed turn and runtime epoch retain their saved deadline across
+poller restarts. Admitted new work invalidates that epoch; active, blocked,
+pending-delivery, and unknown states clear the countdown. A new completed turn
+must establish a fresh full period. Failed and interrupted turns do not qualify.
 
-Consequently, this increment implements durable resume and explicit GC, while
-leaving automatic turn-end process termination disabled. Headless native runs were
-used only to validate persistence/resume; production sessions retain their native
-interactive UI and approval behavior. No approval-policy changes, idle timers,
-new resident service, or forced idle-process kills were added.
+Expiry requires no unresolved access proposals, pending/uncertain message
+receipts, orchestration signals, GitHub events or replies. All loaded native
+threads must be idle, with no queued messages, outstanding native RPCs, approval
+or input requests, continuing/blocked goals, or background terminals. Incomplete
+inspection retains the process. A stopped/missing terminal or saved completed
+history alone never authorizes termination.
+
+### Verified Codex shutdown
+
+TTL Codex launches retain the interactive TUI and native approval policy. A
+sandbox-local WebSocket gateway passes native requests and responses unchanged
+and fences admission for that launch. Paddock's TUI and queue delivery use that
+gateway. The host operation lock serializes expiry, delivery intent, message
+submission, resume and GC. The gateway invalidates idle on new work before it
+waits for the admission gate, so work arriving during the final inspection causes
+expiry to be rejected. Launch generation, conversation, completed turn, workspace
+and runtime epoch must all match the checkpoint.
+
+With admission fenced, the gateway requests the native owner's graceful-only
+`SIGHUP` drain through a kernel peer pidfd. The native drain rejects new work and
+waits for admitted work, including approval waits, to finish. It is a second
+runtime barrier, rather than a check followed by a blind process kill. Repeated
+`SIGHUP` cannot force native shutdown. Paddock never uses `SIGTERM`, a second
+forceable shutdown, an expiry timeout kill, or daemon-stop to terminate model
+work. After the pinned native owner actually exits, the launcher may terminate
+its disconnected TUI frontend. Paddock then confirms launcher exit, stops only the
+task's sandbox, and closes only its already-exited Rex block. Sibling tasks and
+user-added panes in the shared session remain intact.
+
+The host saves release intent and a public-output checkpoint before requesting
+drain. Accepted releases and confirmed native exit are reconciled after lost
+responses or supervisor/poller restarts; recovery never blindly resends a signal.
+Task state becomes `stopped`, with `idle.phase: expired` after cleanup. A later
+`paddock message TASK_ID ...` resumes the same saved conversation with its native
+home, branch, workspace and history, and queues only the new message. It does not
+replay the initial assignment. A message colliding with an operation lock or a
+release in progress is safely offline; use its existing `pending` receipt and
+retry the same external ID once cleanup finishes. `claimed`/`uncertain` receipts
+still require inspection before retry.
+
+`output --json` serves the accepted expiry checkpoint while the sandbox is
+stopped. Existing event IDs and cursors are preserved. Resume returns to the live
+native reader for subsequent output. Native history itself remains in the task's
+sandbox; the checkpoint contains only the existing public output representation,
+not prompts, hidden reasoning or tool results.
+
+This path is qualified against Codex 0.159.2 in Linux with a temporary native home
+and local model fixture. Native active-work and approval-wait drain is also
+qualified against Codex 0.166.0 on macOS. Tests exercise the real interactive
+launcher in a disposable PTY, temporary title-generation helpers, actual native
+completion, active-turn and approval-wait drain, repeated graceful signals,
+rejection of new turns, and same-conversation follow-up resume.
+Ephemeral native helpers cannot have persisted goals or queues; they still must
+pass live idle and background-work checks. See the [native goal implementation](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/app-server/src/request_processors/thread_goal_processor.rs).
+The gateway accepts native versions 0.159.2
+and 0.166.0, whose drain/admission implementation is pinned in the
+[Codex source](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/app-server/src/lib.rs)
+and [native admission barrier](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/app-server/src/turn_admission.rs).
+Unknown versions, missing native APIs, uninspectable runtime state, and kernels
+without `SO_PEERPIDFD` retain the session. All supported client work must go
+through Paddock's gateway; manually bypassing it through the private native
+socket is outside the TTL contract.
+
+### Deployment and agent limitations
+
+Opt-in launches require an updated runtime image containing `paddock-idle` and
+`python3-websockets`, plus the Paddock v8 runtime poller. An older poller is reported
+as incompatible; upgrades do not silently restart it. Existing sessions are not
+retrofitted with a gateway or TTL. No new resident host service is introduced.
+
+Claude policy is validated and saved, but `idle.phase: unsupported` explains that
+its session is retained. Claude 2.1.286 has no qualified live atomic idle release
+interface: a Stop hook or transcript completion can precede continuation and
+cannot prove safe shutdown. See [Claude's Stop hook](https://code.claude.com/docs/en/hooks#stop).
+This preserves its interactive approvals and fails conservatively. Native Codex
+drain that cannot finish, or cleanup whose ownership/process state is unknown,
+is also retained for inspection, without forced termination.
