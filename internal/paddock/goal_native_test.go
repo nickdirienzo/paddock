@@ -4,6 +4,7 @@ package paddock
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,12 @@ func TestNativeCodexGoalLaunch(t *testing.T) {
 	if agent == "" {
 		t.Skip("set PADDOCK_NATIVE_CODEX to test a real Codex binary")
 	}
+	for _, objective := range []string{"Finish the fixture objective", "# Finish the fixture objective\n\n" + strings.Repeat("Preserve all scope and validation requirements. ", 120) + "\nLONG_GOAL_END"} {
+		t.Run(fmt.Sprint(len(objective)), func(t *testing.T) { testNativeCodexGoalLaunch(t, agent, objective) })
+	}
+}
+
+func testNativeCodexGoalLaunch(t *testing.T, agent, objective string) {
 	home, worktree := t.TempDir(), t.TempDir()
 	requests := make(chan string, 10)
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +54,7 @@ func TestNativeCodexGoalLaunch(t *testing.T) {
 	}
 	defer store.Close()
 	task := taskFixture()
-	task.Prompt, task.Runtime, task.Worktree = "/goal Finish the fixture objective", "host", worktree
+	task.Prompt, task.Runtime, task.Worktree = "/goal "+objective, "host", worktree
 	task.Session = Session{Agent: "codex", AgentPath: agent, AgentHome: home, TrustProject: true}
 	if err = store.Insert(task); err != nil {
 		t.Fatal(err)
@@ -84,7 +91,8 @@ func TestNativeCodexGoalLaunch(t *testing.T) {
 	go io.Copy(io.Discard, terminal)
 	select {
 	case request := <-requests:
-		if !strings.Contains(request, "Finish the fixture objective") || !strings.Contains(request, "Paddock context") {
+		encoded, _ := json.Marshal(objective)
+		if !strings.Contains(request, string(encoded[1:len(encoded)-1])) || !strings.Contains(request, "Paddock context") {
 			t.Fatalf("goal/context missing from native turn: %s", request)
 		}
 	case <-ctx.Done():
@@ -101,7 +109,7 @@ func TestNativeCodexGoalLaunch(t *testing.T) {
 	if err = rpc.call("thread/goal/get", map[string]any{"threadId": task.Session.ConversationID}, &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Goal == nil || response.Goal.Objective != "Finish the fixture objective" || response.Goal.Status != "active" {
+	if response.Goal == nil || response.Goal.Objective != nativeGoalObjective(objective) || response.Goal.Status != "active" {
 		t.Fatalf("not an actual native goal: %+v", response.Goal)
 	}
 }
@@ -114,6 +122,23 @@ func TestNativeCodexGoalPreparationBeforeLogin(t *testing.T) {
 	store := openTestStore(t, t.TempDir())
 	task := taskFixture()
 	task.Prompt, task.Runtime, task.Worktree = "/goal Prepare without running model work", "host", t.TempDir()
+	task.Session = Session{Agent: "codex", AgentPath: agent, AgentHome: t.TempDir(), TrustProject: true}
+	if err := store.Insert(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareInitialGoal(context.Background(), store, &task, "/fixture/paddock"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNativeLongGoalPreparation(t *testing.T) {
+	agent := os.Getenv("PADDOCK_NATIVE_CODEX")
+	if agent == "" {
+		t.Skip("set PADDOCK_NATIVE_CODEX to test a real Codex binary")
+	}
+	store := openTestStore(t, t.TempDir())
+	task := taskFixture()
+	task.Prompt, task.Runtime, task.Worktree = "/goal "+strings.Repeat("x", 5200), "host", t.TempDir()
 	task.Session = Session{Agent: "codex", AgentPath: agent, AgentHome: t.TempDir(), TrustProject: true}
 	if err := store.Insert(task); err != nil {
 		t.Fatal(err)

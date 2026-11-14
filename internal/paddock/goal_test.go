@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestGoalPromptParsing(t *testing.T) {
@@ -35,6 +36,53 @@ func TestGoalPromptParsing(t *testing.T) {
 				t.Fatal(objective, goal, err)
 			}
 		})
+	}
+}
+
+func TestNativeGoalObjectiveLimit(t *testing.T) {
+	for _, size := range []int{3999, 4000, 4001, 6000} {
+		full := strings.Repeat("😀", size)
+		got := nativeGoalObjective(full)
+		if utf8.RuneCountInString(got) > 4000 || !utf8.ValidString(got) {
+			t.Fatal("invalid or oversized native objective")
+		}
+		if size <= 4000 && got != full {
+			t.Fatal("changed an objective within the native limit")
+		}
+		if size > 4000 && !strings.Contains(got, "full goal specification") {
+			t.Fatal("lost the full specification reference")
+		}
+	}
+	if got := nativeGoalObjective("# User's goal title\n\n" + strings.Repeat("x", 5000)); !strings.HasPrefix(got, "# User's goal title\n\n") {
+		t.Fatal(got)
+	}
+}
+
+func TestGoalStartupRetryRequiresProofOfUnstartedTask(t *testing.T) {
+	task := taskFixture()
+	task.Prompt, task.Status, task.Error = "/goal Build it", "failed", "Codex rejected thread/goal/set; use a Codex build with Goals enabled"
+	code := 1
+	task.Session = Session{Agent: "codex", Generation: 1, ExitCode: &code}
+	if !canRetryInitialGoalStartup(task) {
+		t.Fatal("cannot recover the original startup failure")
+	}
+	task.Error = "Codex goal setup failed: unavailable"
+	if !canRetryInitialGoalStartup(task) {
+		t.Fatal("cannot recover a confirmed setup failure")
+	}
+	for _, change := range []func(*Task){
+		func(t *Task) { t.Error = "unrelated failure" },
+		func(t *Task) { t.Session.Resume = true },
+		func(t *Task) { t.Session.GoalInitialized = true },
+		func(t *Task) { t.Session.ConversationID = "saved-thread" },
+		func(t *Task) { t.Session.ExitCode = nil },
+		func(t *Task) { t.Session.Agent = "claude" },
+	} {
+		changed := task
+		change(&changed)
+		if canRetryInitialGoalStartup(changed) {
+			t.Fatal("allowed replay without proof of an unstarted task", changed)
+		}
 	}
 }
 

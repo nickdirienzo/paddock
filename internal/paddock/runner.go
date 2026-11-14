@@ -200,8 +200,9 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		}
 	}
 	if err = prepareInitialGoal(context.Background(), store, &t, exe, hookTrust); err != nil {
-		fmt.Fprintln(os.Stderr, "Could not initialize Codex goal:", err)
-		_ = store.Finish(t.ID, 1, err.Error())
+		message := "Codex goal setup failed: " + err.Error()
+		fmt.Fprintln(os.Stderr, message)
+		_ = store.Finish(t.ID, 1, message)
 		return 1
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)

@@ -29,6 +29,21 @@ func parseGoalPrompt(prompt string) (string, bool, error) {
 	return objective, true, nil
 }
 
+// Codex limits the durable objective to 4000 Unicode characters. Keep a long
+// specification intact in model-visible history and use its first line as the
+// durable objective, with an explicit reference to all of the original criteria.
+func nativeGoalObjective(objective string) string {
+	if utf8.RuneCountInString(objective) <= 4000 {
+		return objective
+	}
+	const reference = "\n\nComplete the full goal specification recorded in this conversation, including all acceptance criteria, scope limits, and constraints."
+	title := strings.SplitN(objective, "\n", 2)[0]
+	if chars := []rune(title); len(chars) > 4000-utf8.RuneCountInString(reference) {
+		title = string(chars[:4000-utf8.RuneCountInString(reference)-1]) + "…"
+	}
+	return title + reference
+}
+
 // goalRPC owns a temporary metadata server, never the interactive agent's owner.
 // Preparation creates only a paused goal. Activation uses a second server that
 // does not load the thread, so model work starts only when the TUI resumes it.
@@ -38,6 +53,18 @@ type goalRPC struct {
 	encoder *json.Encoder
 	scanner *bufio.Scanner
 	nextID  int
+}
+
+type goalRPCError struct {
+	method  string
+	message string
+}
+
+func (e *goalRPCError) Error() string {
+	if e.message == "goals feature is disabled" {
+		return "Codex Goals are disabled; enable Goals before starting a /goal task"
+	}
+	return fmt.Sprintf("Codex rejected %s; native goal setup was not confirmed", e.method)
 }
 
 func openGoalRPC(ctx context.Context, task Task, home, exe string, overrides ...string) (*goalRPC, error) {
@@ -110,7 +137,11 @@ func (r *goalRPC) call(method string, params, result any) error {
 			continue
 		}
 		if len(message.Error) != 0 {
-			return fmt.Errorf("Codex rejected %s; use a Codex build with Goals enabled", method)
+			var remote struct {
+				Message string `json:"message"`
+			}
+			_ = json.Unmarshal(message.Error, &remote)
+			return &goalRPCError{method: method, message: remote.Message}
 		}
 		if result != nil {
 			return json.Unmarshal(message.Result, result)
@@ -134,6 +165,7 @@ func prepareInitialGoal(ctx context.Context, store *Store, task *Task, exe strin
 	if task.Session.Agent != "codex" {
 		return fmt.Errorf("/goal requires the Codex agent")
 	}
+	objective = nativeGoalObjective(objective)
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if task.Session.ConversationID == "" {
@@ -208,8 +240,13 @@ func preparePausedGoal(ctx context.Context, store *Store, task *Task, exe, objec
 	}
 	contextTask := *task
 	contextTask.Prompt = ""
+	context := strings.TrimSpace(agentPrompt(contextTask, store.Home, exe))
+	fullObjective, _, _ := parseGoalPrompt(task.Prompt)
+	if objective != fullObjective {
+		context = "Full goal specification:\n\n" + fullObjective + "\n\n" + context
+	}
 	if err = rpc.call("thread/inject_items", map[string]any{"threadId": thread, "items": []any{map[string]any{
-		"type": "message", "role": "user", "content": []any{map[string]string{"type": "input_text", "text": strings.TrimSpace(agentPrompt(contextTask, store.Home, exe))}},
+		"type": "message", "role": "user", "content": []any{map[string]string{"type": "input_text", "text": context}},
 	}}}, nil); err != nil {
 		return err
 	}

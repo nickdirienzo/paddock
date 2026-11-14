@@ -113,6 +113,9 @@ current goal state without creating or restarting the goal. Ordinary prompts kee
 their usual behavior. `/goal` requires Codex with Goals enabled; an empty goal or a
 Claude selection is rejected. Use `/goal pause`, `/goal resume`, and `/goal clear`
 inside an existing Codex conversation to manage its goal.
+For specifications over Codex's 4,000-character objective limit, Paddock uses the
+first line as the native objective and saves the entire specification in the
+conversation, preserving all acceptance criteria and constraints.
 
 `new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
 `--client`, `--identity`, `--launcher`, and `--codex-tui`. `--runtime` accepts
