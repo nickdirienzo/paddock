@@ -1,8 +1,7 @@
 # Model-backed orchestration (legacy)
 
 Model-backed planning is unavailable. Its former planner ran on the host, while
-Paddock now requires all LLM execution to remain inside OpenShell. Existing
-signal records can be inspected with `paddock orchestrate show SOURCE ID`, but
+Model-backed planning remains unavailable. Existing signal records can be inspected with `paddock orchestrate show SOURCE ID`, but
 new model-backed plans cannot run.
 
 For deterministic integration dispatch, use the [structured CLI

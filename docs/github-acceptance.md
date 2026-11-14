@@ -1,9 +1,10 @@
 # GitHub coordination acceptance evidence
 
-This file records historical checks. Host agent execution and model-backed
-planning described below are unavailable under the current OpenShell-only
-runtime. See [current identity acceptance](identity-acceptance.md) for live
-validation of the new execution path.
+This file records historical checks. Host agent execution and native message
+delivery are supported alongside OpenShell; model-backed planning remains
+unavailable. See [launcher configurations](launchers.md) for the current execution
+settings and [identity acceptance](identity-acceptance.md) for earlier runtime
+validation.
 
 ## Claude delivery — 2026-11-09
 

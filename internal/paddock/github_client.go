@@ -20,7 +20,7 @@ type GitHubIdentity struct {
 	App       *GitHubAppConfig `json:"app,omitempty"`
 	Owner     string           `json:"owner,omitempty"`
 	CreatedAt string           `json:"created_at,omitempty"`
-	Profiles  []string         `json:"profiles,omitempty"`
+	Launcher  string           `json:"launcher,omitempty"`
 	Disabled  bool             `json:"disabled,omitempty"`
 	BotUserID int64            `json:"bot_user_id,omitempty"`
 }
@@ -147,17 +147,14 @@ func (g GitHubAPI) VerifyRepository(ctx context.Context, repo string) error {
 	return nil
 }
 
-// VerifyExecutionProfile asks GitHub for the same repository-scoped token a
+// VerifyExecutionAccess asks GitHub for the same repository-scoped token a
 // task would receive, then discards it. This catches missing installation
 // permissions before an agent launch without persisting a credential.
-func (g GitHubAPI) VerifyExecutionProfile(ctx context.Context, repo, profile string) error {
-	if !validProfile(profile) {
-		return fmt.Errorf("unknown execution profile %q", profile)
-	}
+func (g GitHubAPI) VerifyExecutionAccess(ctx context.Context, repo string, readOnly bool) error {
 	if g.app == nil {
 		return fmt.Errorf("identity has no GitHub App installation")
 	}
-	_, _, err := g.app.repositoryTokenForExecution(ctx, repo, profile)
+	_, _, err := g.app.repositoryTokenForExecution(ctx, repo, readOnly)
 	return err
 }
 

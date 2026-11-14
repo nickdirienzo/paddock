@@ -246,10 +246,21 @@ func (s *Store) update(id string, fn func(*Task) error) error {
 		if err != nil {
 			return err
 		}
+		launcher, err := json.Marshal(t.Launcher)
+		if err != nil {
+			return err
+		}
 		provenance := t.Provenance
 		provenance.Context = maps.Clone(t.Provenance.Context)
 		if err = fn(&t); err != nil {
 			return err
+		}
+		updatedLauncher, err := json.Marshal(t.Launcher)
+		if err != nil {
+			return err
+		}
+		if string(launcher) != string(updatedLauncher) {
+			return fmt.Errorf("task launcher is immutable")
 		}
 		if !reflect.DeepEqual(t.Provenance, provenance) {
 			return fmt.Errorf("task provenance is immutable")

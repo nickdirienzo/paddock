@@ -35,10 +35,7 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	if task.Idle != nil && (task.Idle.Phase == "releasing" || task.Idle.Phase == "draining") {
 		return "", fmt.Errorf("%w: native idle release is being reconciled; retry after task stops", ErrAgentOffline)
 	}
-	if task.RuntimeName() != "openshell" {
-		return "", fmt.Errorf("%w: host agent task %s cannot receive messages; LLM execution requires OpenShell", ErrAgentOffline, task.ID)
-	}
-	if task.Provenance.Profile == "investigation" && !investigationGuardReady(task) {
+	if task.ReadOnly() && !investigationGuardReady(task) {
 		return "", fmt.Errorf("%w: investigation task %s has no verified read-only guard", ErrAgentOffline, task.ID)
 	}
 	task, observation, err := s.Refresh(ctx, task)

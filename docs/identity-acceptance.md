@@ -1,3 +1,6 @@
+> Historical acceptance record for PR #27. Host execution, TP, and native host
+> follow-ups were subsequently restored; identities now map to [launcher configs](launchers.md).
+
 # Agent identity acceptance notes
 
 ## 2026-11-12 live checks

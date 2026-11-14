@@ -2,23 +2,111 @@ package paddock
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-type TPOptions struct{ Agent, Backend string }
+type TPOptions struct{ Agent, Backend, CodexTUI string }
 
 type tpSession struct {
-	Version int    `json:"version"`
-	TaskID  string `json:"task_id"`
-	Agent   string `json:"agent"`
-	Backend string `json:"terminal"`
+	Version  int    `json:"version"`
+	TaskID   string `json:"task_id"`
+	Agent    string `json:"agent"`
+	Backend  string `json:"terminal"`
+	CodexTUI string `json:"codex_tui,omitempty"`
 }
 
-// TeamPrincipal is unavailable while its host-only execution path is retired.
+// TeamPrincipal reserves one ordinary task per registry, then uses the normal
+// launch/resume machinery. The separate lock spans launch without holding the
+// registry lock needed by the task supervisor.
 func (s Service) TeamPrincipal(ctx context.Context, o TPOptions) (Task, error) {
-	return Task{}, fmt.Errorf("Team Principal requires host agent execution and is unavailable")
+	if err := validateCodexTUI(o.CodexTUI); err != nil {
+		return Task{}, err
+	}
+	if o.Agent != "" && o.Agent != "codex" && o.Agent != "claude" {
+		return Task{}, fmt.Errorf("unknown agent %q (use codex or claude)", o.Agent)
+	}
+	if o.Backend != "" && o.Backend != "auto" && o.Backend != "rex" && o.Backend != "screen" {
+		return Task{}, fmt.Errorf("unknown terminal %q (use auto, rex, or screen)", o.Backend)
+	}
+	dir := filepath.Join(s.Store.Home, "tp")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return Task{}, err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, ".launch.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return Task{}, err
+	}
+	defer lock.Close()
+	locked, err := tryLock(lock)
+	if err != nil {
+		return Task{}, err
+	}
+	if !locked {
+		return Task{}, fmt.Errorf("Team Principal is already opening; retry shortly")
+	}
+	defer unlock(lock)
+	path := filepath.Join(dir, "session.json")
+	var state tpSession
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		agent := o.Agent
+		if agent == "" {
+			agent = "codex"
+		}
+		state = tpSession{Version: 1, TaskID: newID(), Agent: agent, Backend: o.Backend, CodexTUI: o.CodexTUI}
+		// Persist the reserved ID before any task launch can have effects. A
+		// failed or uncertain launch must never create a second TP task.
+		if err = writeJSONAtomic(path, state); err != nil {
+			return Task{}, err
+		}
+	} else if err != nil {
+		return Task{}, err
+	} else {
+		if err = json.Unmarshal(data, &state); err != nil {
+			return Task{}, fmt.Errorf("read Team Principal session: %w", err)
+		}
+		if state.Version != 1 || !validID(state.TaskID) || (state.Agent != "codex" && state.Agent != "claude") {
+			return Task{}, fmt.Errorf("invalid Team Principal session record; inspect %s", path)
+		}
+	}
+	if o.Agent != "" && o.Agent != state.Agent {
+		return Task{}, fmt.Errorf("Team Principal already uses %s; omit --agent to return to its conversation", state.Agent)
+	}
+	var task Task
+	err = s.Store.withLock(func() error {
+		var e error
+		task, e = s.Store.read(state.TaskID)
+		return e
+	})
+	if err == nil {
+		if task.Role != "tp" || task.RuntimeName() != "host" || task.Session.Agent != state.Agent {
+			return task, fmt.Errorf("Team Principal record does not match its task")
+		}
+		if o.Backend != "" && o.Backend != "auto" && o.Backend != task.Session.Backend {
+			return task, fmt.Errorf("Team Principal already uses %s; omit --terminal to reconnect", task.Session.Backend)
+		}
+		return s.ResumeWithCodexTUI(ctx, task.ID, o.CodexTUI)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return task, err
+	}
+	repo, err := s.prepareTPRepository(ctx, dir)
+	if err != nil {
+		return Task{}, err
+	}
+	mode := state.CodexTUI
+	if o.CodexTUI != "" {
+		mode = o.CodexTUI
+	}
+	return s.Run(ctx, RunOptions{
+		ID: state.TaskID, Role: "tp", Runtime: "host", Launcher: "host", Agent: state.Agent,
+		Backend: state.Backend, Repo: repo, CodexTUI: mode,
+		Prompt: "Team Principal: help the user lead the agents working on Paddock tasks.",
+	})
 }
 
 func (s Service) prepareTPRepository(ctx context.Context, dir string) (string, error) {

@@ -7,8 +7,9 @@ integration assertions, not authentication. Run each service under its own OS
 account and create its own named Paddock identity.
 
 ```sh
-paddock identity create remediation --profiles investigation,implementation
-paddock run --repo project --identity remediation --profile investigation \
+paddock launcher configure investigation --runtime openshell --read-only true
+paddock identity create remediation --launcher investigation
+paddock run --repo project --identity remediation --launcher investigation \
   --requester 'user-123' --requester-source 'incident-service' \
   --external-id 'case-456' --context-file context.json --idle-ttl 24h --json --detach \
   'Investigate the reported issue'
@@ -23,7 +24,7 @@ paddock message TASK_ID 'Follow-up detail' --external-id 'followup-789' --json
 `context.json` is a JSON object of string keys and values, limited to 64 KiB.
 Use it for correlation and structured context; the task prompt carries work
 instructions. Paddock snapshots the caller, requester, context, external ID,
-identity, authenticated GitHub actor, profile, and capabilities in immutable
+identity, authenticated GitHub actor, launcher, and capabilities in immutable
 task provenance.
 `--external-id` is an idempotency key scoped to the local caller and requester
 source. A repeated dispatch with the same prompt and identity returns its prior
@@ -93,16 +94,19 @@ unavailable after sandbox removal is also an explicit error. Legacy host tasks
 have no supported output reader. `message --json` continues to report delivery
 only; pair its receipt with `output --json` to receive the agent's answer.
 
-Named identity and integration runs require OpenShell. The trusted local caller
-selects an allowed `investigation` or `implementation` profile. An unbacked
-identity can work locally in OpenShell with no GitHub actor, token, or PR
-capability. App-backed investigation receives a repository-scoped read token
-and read-only GitHub policy. Investigation agents also run under a source-content
-write guard with separate writable scratch and agent state. App-backed
-implementation receives scoped write
-permissions. The App private key stays on the host and the task receives a
-short-lived installation token through its own OpenShell provider. The task
-cannot choose a broader profile.
+Identities map to [named launcher configurations](launchers.md). A launcher selects
+runtime, coding agent, terminal, and execution settings, including an optional
+OpenShell config. Configuration names carry no built-in permissions. The starter
+`investigation` config sets `read_only: true`; `implementation` uses a writable
+OpenShell checkout. These are editable configs, and custom names work identically.
+A read-only launcher requires OpenShell and uses a guarded source checkout and
+repository-scoped read-only GitHub token and policy. Writable OpenShell tasks get
+scoped write permissions when the identity has an App. An unbacked identity can
+work locally inside OpenShell without a GitHub actor, token, or PR capability.
+The App private key stays on the host; task tokens go through an OpenShell provider.
+Host launchers run native local agents with their existing authentication and
+permission settings. They do not inject the identity's GitHub App credentials or
+claim an App actor. Follow-ups and resume use the task's saved runtime and config.
 
 The CLI contains no application-specific requester interpretation. Integrations
 must authenticate their own users and authorize requests before invoking it.

@@ -10,10 +10,10 @@ import (
 )
 
 func TestPrintTaskDistinguishesLogicalIdentityAndGitHubActor(t *testing.T) {
-	task := paddock.Task{Provenance: paddock.TaskProvenance{Caller: "501:engineer", Requester: "user-123", RequesterSource: "service-api", Identity: "investigator", Profile: "investigation", Capabilities: []string{"repository.read", "analysis"}}, OpenShell: &paddock.OpenShellTask{Name: "pd-task"}}
+	task := paddock.Task{Provenance: paddock.TaskProvenance{Caller: "501:engineer", Requester: "user-123", RequesterSource: "service-api", Identity: "investigator", Launcher: "investigation", Capabilities: []string{"repository.read", "analysis"}}, OpenShell: &paddock.OpenShellTask{Name: "pd-task"}}
 	var output bytes.Buffer
 	printTask(&output, task)
-	for _, field := range []string{"Local caller: 501:engineer", "Asserted requester: user-123 (service-api)", "Paddock identity: investigator", "Profile: investigation", "Capabilities: repository.read, analysis"} {
+	for _, field := range []string{"Local caller: 501:engineer", "Asserted requester: user-123 (service-api)", "Paddock identity: investigator", "Launcher: investigation", "Capabilities: repository.read, analysis"} {
 		if !strings.Contains(output.String(), field) {
 			t.Fatalf("missing %q in %s", field, output.String())
 		}

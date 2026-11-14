@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 9 // v9 reconciles integration-only Claude idle TTLs too.
+const githubPollerVersion = 11 // v11 preserves per-session Codex TUI settings during poller updates.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -342,9 +342,6 @@ func (s Service) WatchSessionState(ctx context.Context, id string) string {
 	task, err := s.Store.Get(id)
 	if err != nil {
 		return "missing"
-	}
-	if task.RuntimeName() != "openshell" && s.messageDelivery == nil {
-		return "unsupported"
 	}
 	if !nativeMessageSupported(task) {
 		return "unsupported"

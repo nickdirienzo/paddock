@@ -9,9 +9,10 @@ and [the integration interface](integrations.md).
 
 ## Setup
 
-Requirements: Git, a configured OpenShell gateway, agent image, model provider,
-a named identity, and either a running local Rex server or GNU Screen. A GitHub
-App is required for GitHub work; local-only identities need no App. macOS is
+Requirements: Git, a native coding agent, and either a running local Rex server
+or GNU Screen for host tasks. OpenShell tasks also need a configured gateway,
+agent image, and model provider. OpenShell GitHub work requires an App-backed
+identity; local-only identities need no App. macOS is
 the tested development platform; the terminal adapters also target Unix
 environments. Native Windows terminal execution is not implemented (use WSL).
 Building a Windows binary alone does not provide Windows terminal support.
@@ -98,7 +99,7 @@ Control setting to allow session selection.
 
 Use arrows to choose a repository or agent, Tab / Shift-Tab to move between
 fields, Enter for a newline in the prompt, and Escape or Ctrl-C to cancel. Both
-Codex and Claude Code are shown in the agent list; all agent tasks use OpenShell. Selecting **Cancel** or pressing
+Codex and Claude Code are shown in the agent list; the configured launcher selects the runtime. Selecting **Cancel** or pressing
 Escape or Ctrl-C creates no task. Launch errors remain visible until
 dismissed. If session selection fails after creation, the launcher shows the
 existing task's attach command; it does not launch again.
@@ -163,7 +164,7 @@ the approved author list, and asks agents to report watch and poller readiness w
 handing back the PR. It also covers delegation and queued replies.
 Skills teach the workflow; installing one does not start a poller or configure GitHub
 access. Registering a watch starts or reuses one background poller per registry. It
-routes comments to online sessions, resumes stopped OpenShell Codex and Claude conversations when their
+routes comments to online sessions, resumes stopped host and OpenShell Codex and Claude conversations when their
 identity is saved, and publishes queued replies. Unrecoverable sessions keep comments pending. Use `paddock github start`, `stop`, and `status --json` to manage
 it. Agent exits leave the shared poller running. After reboot, start it again.
 
@@ -250,13 +251,15 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 | --- | --- |
 | `paddock new` | Open an interactive task form and display the created Rex session. |
 | `paddock rex setup\|remove` | Install or remove the floating task launcher and shortcut in Rex's configuration. |
-| `paddock run <prompt\|->` | Persist a task with an authorized identity and profile, create its worktree, launch the agent in OpenShell, and return its ID; `-` reads a multiline prompt from stdin. |
+| `paddock run <prompt\|->` | Persist a task with its identity and resolved launcher, create its worktree, launch the agent, and return its ID; `-` reads a multiline prompt from stdin. |
 | `paddock tasks` | List all repositories' tasks with recorded process status and current terminal observations. |
 | `paddock show <id>` | Show provenance, prompt, task and native turn state, pending access requests, terminal, and exit status. |
 | `paddock output <id> --after <cursor> --limit <n> --json` | Page through public agent messages and finished turns in the saved OpenShell conversation. |
 | `paddock artifacts <id>` | Report commits, workspace changes, and PRs for a task. |
 | `paddock message <id> <text>` | Send a native follow-up with an optional idempotency key. |
-| `paddock identity create\|show\|verify` | Create, inspect, and verify a named agent identity. |
+| `paddock launcher list\|show\|configure` | Inspect or edit named launcher configs. |
+| `paddock tp` | Reconnect to the persistent host Team Principal conversation. |
+| `paddock identity create\|configure\|show\|verify` | Create, inspect, and verify a named agent identity. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
@@ -264,7 +267,11 @@ Task IDs accept unique prefixes. `run`, `delegate`, `tasks`, `show`, and `output
 
 `run` and `delegate` accept `--agent codex|claude`,
 `--terminal auto|rex|screen`, `--repo <directory>`, `--base <ref>`,
-`--identity <name>`, and `--profile investigation|implementation`. For
+`--identity <name>`, `--launcher <name>`, and `--runtime host|openshell`.
+For Codex, `--codex-tui scrollback|fullscreen|default` selects a per-task view.
+It also works with `new`, `tp`, and `resume`; launcher configs accept `codex_tui`.
+Identities map to [launcher configurations](launchers.md); explicit flags override
+launcher defaults. Unmapped runs use the default launcher and OpenShell fallback. For
 integration calls, also use `--requester`, `--requester-source`, `--external-id`,
 and `--context-file`. Options may precede or follow the prompt.
 
@@ -444,8 +451,8 @@ mise run check
 Tests cover restart persistence, parent-child lookup, concurrent writers,
 atomic state, repository resolution, identity ownership and routing, immutable
 provenance, credential boundaries, terminal observation, lifecycle recovery,
-and profile authorization. Legacy host-agent terminal tests are skipped while
-host LLM execution is unavailable. Live OpenShell and GitHub App checks are
+and configurable launcher policies. Host-agent fixtures exercise launch, native
+follow-up, stop/resume, and persistent Team Principal conversations. Live OpenShell and GitHub App checks are
 recorded in the [identity acceptance notes](identity-acceptance.md).
 
 For development and wrappers, `PADDOCK_CODEX_BIN`, `PADDOCK_CLAUDE_BIN`, `PADDOCK_REX_BIN`, and `PADDOCK_SCREEN_BIN` override executable locations. Values are executable paths, not shell command strings.

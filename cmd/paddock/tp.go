@@ -10,7 +10,7 @@ import (
 	"github.com/nickdirienzo/paddock/internal/paddock"
 )
 
-const tpHelp = `Usage: paddock tp [--agent codex|claude] [--terminal auto|rex|screen] [--json] [--detach] [--client Rex-client-id]
+const tpHelp = `Usage: paddock tp [--agent codex|claude] [--terminal auto|rex|screen] [--codex-tui default|scrollback|fullscreen] [--json] [--detach] [--client Rex-client-id]
 
 Open the persistent Team Principal conversation for this Paddock registry.
 The team is every agent working on Paddock tasks, across all projects.
@@ -21,7 +21,7 @@ Project decisions live in projects/ inside TP's retained worktree.
 `
 
 func runTP(args []string, out io.Writer) error {
-	o, pos, err := parse(args, "agent terminal json detach client")
+	o, pos, err := parse(args, "agent terminal codex-tui json detach client")
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func runTP(args []string, out io.Writer) error {
 	}
 	service := paddock.Service{Store: store, Executable: exe}
 	ctx := context.Background()
-	task, err := service.TeamPrincipal(ctx, paddock.TPOptions{Agent: o["agent"], Backend: o["terminal"]})
+	task, err := service.TeamPrincipal(ctx, paddock.TPOptions{Agent: o["agent"], Backend: o["terminal"], CodexTUI: o["codex-tui"]})
 	if err != nil {
 		return err
 	}

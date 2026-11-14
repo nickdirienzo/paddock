@@ -54,7 +54,6 @@ func TestTPKeepsDurableWorkspaceOutOfGC(t *testing.T) {
 }
 
 func TestTPRejectsCorruptRecordsAndConcurrentOpen(t *testing.T) {
-	t.Skip("host Team Principal execution is disabled")
 	s := openTestStore(t, t.TempDir())
 	dir := filepath.Join(s.Home, "tp")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -87,8 +86,10 @@ func TestTPRejectsCorruptRecordsAndConcurrentOpen(t *testing.T) {
 }
 
 func TestTPUncertainLaunchDoesNotCreateReplacement(t *testing.T) {
-	t.Skip("host Team Principal execution is disabled")
 	s := openTestStore(t, t.TempDir())
+	if err := s.SetLauncherConfig("default", LauncherConfig{Runtime: "openshell", ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PADDOCK_CODEX_BIN", script(t, "exit 1"))
 	t.Setenv("PADDOCK_SCREEN_BIN", script(t, `case "$1" in
  --version) echo 'Screen version fixture' ;;
@@ -112,7 +113,6 @@ esac`))
 // Exercise the real CLI, supervisor, worktrees, delegation and native resume
 // arguments with deterministic agent/terminal fixtures, without model calls.
 func TestTPVerticalSlice(t *testing.T) {
-	t.Skip("host Team Principal execution is disabled")
 	exe := buildCLI(t)
 	home, control := t.TempDir(), t.TempDir()
 	s := openTestStore(t, home)
@@ -251,15 +251,5 @@ fi
 	tasks, err := s.List("")
 	if err != nil || len(tasks) != 3 {
 		t.Fatal("unexpected duplicate tasks", tasks, err)
-	}
-}
-
-func TestTeamPrincipalCannotLaunchHostAgent(t *testing.T) {
-	s := openTestStore(t, t.TempDir())
-	if _, err := (Service{Store: s}).TeamPrincipal(context.Background(), TPOptions{}); err == nil || !strings.Contains(err.Error(), "unavailable") {
-		t.Fatal(err)
-	}
-	if tasks, err := s.List(""); err != nil || len(tasks) != 0 {
-		t.Fatal(tasks, err)
 	}
 }

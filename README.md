@@ -79,7 +79,9 @@ installation. Saving the App settings alone does not update existing
 installations. See [GitHub App setup](docs/github.md#configure-a-github-app) for
 the App ID, private key, installation, and repository routing steps.
 
-Agent execution requires OpenShell. Existing host task records remain inspectable, but cannot resume.
+Agent execution defaults to OpenShell. Use `--runtime host` for native local agents,
+or map an identity to a [launcher configuration](docs/launchers.md).
+`paddock tp` opens the persistent host Team Principal conversation.
 
 If you use Rex, enable **Remote Control** in its settings so Paddock can open
 task tabs.
@@ -105,7 +107,7 @@ for installation details.
 Use `paddock tasks`, `paddock show`, `paddock output`, and `paddock artifacts`
 to inspect agent work. `paddock output TASK_ID --json` returns public agent
 messages and finished turns with a cursor for polling.
-The former host Team Principal is unavailable under the OpenShell isolation rule.
+`paddock tp` opens or resumes a persistent Team Principal conversation across projects.
 
 For an interactive task form, run `paddock new`. Choose a repository and agent,
 write a multiline prompt, and select **Start task**. Registered repository names

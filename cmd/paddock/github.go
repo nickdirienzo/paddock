@@ -185,7 +185,7 @@ func runGitHub(args []string, out io.Writer) error {
 				if previous.Owner != "" && previous.Owner != caller {
 					return fmt.Errorf("caller is not the owner of identity %q", name)
 				}
-				identity.Owner, identity.CreatedAt, identity.Profiles = previous.Owner, previous.CreatedAt, previous.Profiles
+				identity.Owner, identity.CreatedAt, identity.Launcher = previous.Owner, previous.CreatedAt, previous.Launcher
 				identity.Disabled = previous.Disabled
 			} else {
 				identity.Owner, identity.CreatedAt = caller, time.Now().UTC().Format(time.RFC3339Nano)
