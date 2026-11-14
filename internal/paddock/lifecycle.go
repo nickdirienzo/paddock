@@ -173,6 +173,17 @@ func canRetryInitialMCPStartup(t Task) bool {
 			t.Error == "trusted host MCP tools are unavailable; LLM tool execution requires OpenShell")
 }
 
+// Goal setup admits no model turns before the TUI runs. These exact startup
+// failures therefore permit retrying an unstarted task in its existing worktree.
+func canRetryInitialGoalStartup(t Task) bool {
+	_, goal, err := parseGoalPrompt(t.Prompt)
+	return err == nil && goal && t.Session.Agent == "codex" && t.Status == "failed" &&
+		t.Session.Generation > 0 && !t.Session.Resume && !t.Session.GoalInitialized && t.Session.ConversationID == "" &&
+		t.Session.ExitCode != nil && *t.Session.ExitCode == 1 &&
+		(strings.HasPrefix(t.Error, "Codex goal setup failed: ") ||
+			t.Error == "Codex rejected thread/goal/set; use a Codex build with Goals enabled")
+}
+
 func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	t, err := s.Store.Get(id)
 	if err != nil {
@@ -205,7 +216,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		return t, err
 	}
 	release()
-	retryInitial := canRetryInitialMCPStartup(t)
+	retryInitial := canRetryInitialMCPStartup(t) || canRetryInitialGoalStartup(t)
 	if t.RuntimeName() == "openshell" {
 		if err = s.startTaskSandbox(ctx, &t); err != nil {
 			return t, err

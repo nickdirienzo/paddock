@@ -164,6 +164,11 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	if err = s.resolveLauncher(&o); err != nil {
 		return empty, err
 	}
+	if _, goal, err := parseGoalPrompt(o.Prompt); err != nil {
+		return empty, err
+	} else if goal && o.Agent != "codex" {
+		return empty, fmt.Errorf("/goal requires the Codex agent; choose Codex or remove /goal")
+	}
 	if o.Parent != "" {
 		parent, err := s.Store.Get(o.Parent)
 		if err != nil {

@@ -15,7 +15,7 @@ import (
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
-func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
+func agentPrompt(t Task, home, exe string) string {
 	prompt := t.Prompt + "\n\nPaddock context: task " + t.ID + ". Work in this task's current Git worktree. " +
 		"Read the Paddock agent guide by running " + quote(exe) + " skill show before coordinating tasks or PR work. " +
 		"Keep ordinary work in this task. When independent help is authorized, prefer native subagents for short reviews and checks. Use Paddock delegation only when a durable child task, separate worktree, or reconnectable session is needed, or the user requests it. " +
@@ -36,6 +36,18 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	if t.Role == "tp" {
 		prompt = teamPrincipalPrompt(t, home, exe)
 	}
+	if t.launchNotice != "" {
+		prompt += "\n\n" + t.launchNotice
+	}
+	return prompt
+}
+
+func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
+	prompt := agentPrompt(t, home, exe)
+	// Attach to the prepared goal without replaying it as an ordinary prompt.
+	if t.Session.GoalInitialized {
+		t.Session.Resume = true
+	}
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
 	args := codexTUIArgs(t)
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {
@@ -50,17 +62,7 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "claude" {
 		args = append(args, "--model", "opus")
 	}
-	if t.Session.Agent == "codex" && t.Session.TrustProject {
-		// An inline TOML table preserves dots and quotes in the path. Codex's
-		// CLI dotted-key parser does not parse quoted path components.
-		path, _ := json.Marshal(t.Worktree)
-		args = append(args, "--config", "projects={"+string(path)+"={trust_level=\"trusted\"}}")
-		for _, override := range overrides {
-			if override != "" {
-				args = append(args, "--config", override)
-			}
-		}
-	}
+	args = append(args, codexTrustArgs(t, overrides...)...)
 	if t.Session.Resume {
 		if t.Session.Agent == "codex" {
 			args = append(args, "resume", t.Session.ConversationID)
@@ -99,12 +101,32 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	}
 	c := exec.Command(t.Session.AgentPath, args...)
 	c.Dir = t.Worktree
-	c.Env = append(agentControlEnv(t), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
-		"PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c.Env = agentLaunchEnv(t, home, exe)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c
+}
+
+func agentLaunchEnv(t Task, home, exe string) []string {
+	return append(agentControlEnv(t), "PADDOCK_HOME="+home, "PADDOCK_TASK_ID="+t.ID, "PADDOCK_PARENT_TASK_ID="+t.ParentID,
+		"PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func codexTrustArgs(t Task, overrides ...string) []string {
+	var args []string
+	if t.Session.Agent == "codex" && t.Session.TrustProject {
+		// An inline TOML table preserves dots and quotes in the path. Codex's
+		// CLI dotted-key parser does not parse quoted path components.
+		path, _ := json.Marshal(t.Worktree)
+		args = append(args, "--config", "projects={"+string(path)+"={trust_level=\"trusted\"}}")
+		for _, override := range overrides {
+			if override != "" {
+				args = append(args, "--config", override)
+			}
+		}
+	}
+	return args
 }
 
 // RunAgent runs inside the terminal. Its lifetime is independent of `paddock run`.
@@ -173,9 +195,15 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 			if t.Session.Resume {
 				t.Session.ResumeNotice = strings.TrimSpace(t.Session.ResumeNotice + "\n\n" + notice)
 			} else {
-				t.Prompt += "\n\n" + notice
+				t.launchNotice = notice
 			}
 		}
+	}
+	if err = prepareInitialGoal(context.Background(), store, &t, exe, hookTrust); err != nil {
+		message := "Codex goal setup failed: " + err.Error()
+		fmt.Fprintln(os.Stderr, message)
+		_ = store.Finish(t.ID, 1, message)
+		return 1
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
 	var inbox claudeInbox
