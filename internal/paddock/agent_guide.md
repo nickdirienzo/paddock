@@ -171,7 +171,7 @@ arrive individually. GitHub does not support eyes reactions on review summaries.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
 and authorized authors trigger delivery. Incoming PR message delivery supports
 Codex and Claude tasks in OpenShell.
-Claude inbox delivery is qualified for Claude Code 2.1.286.
+Claude inbox delivery accepts Claude Code 2.1.286 and 2.1.325. New images pin 2.1.325.
 Claude applies its own peer-message admission and tool approvals; held or uncertain
 deliveries require inspection, never terminal typing or blind retries.
 

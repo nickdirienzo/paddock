@@ -109,6 +109,16 @@ policy is saved as canonical `idle_ttl` (for example `24h0m0s`). It is independe
 of the seven-day workspace retention clock and never removes a branch, workspace,
 native conversation, or output history.
 
+Claude tasks support the same flag for **integration-only** sessions: submit all
+work through `paddock message` or Paddock's integration delivery paths, and do not
+type into the native TUI or use its inbox directly. Viewing the TUI is supported.
+Paddock keeps subagents in the foreground and disables background sessions,
+background shell execution, session cron tasks, MCP tasks, Monitor, automatic idle
+compaction, model-proposed goals and automatic usage-limit continuation. These
+restrictions apply on launch and resume only when a TTL is set. Foreground
+subagents and native approval dialogs remain available. See
+[Claude's environment variables](https://code.claude.com/docs/en/env-vars).
+
 Children do **not** inherit a parent's TTL. Supply `delegate --idle-ttl` for each
 child that should expire; each child's timer and native owner are independent.
 A repeated dispatch using the same external ID must include the same effective
@@ -147,9 +157,9 @@ With admission fenced, the gateway requests the native owner's graceful-only
 `SIGHUP` drain through a kernel peer pidfd. The native drain rejects new work and
 waits for admitted work, including approval waits, to finish. It is a second
 runtime barrier, rather than a check followed by a blind process kill. Repeated
-`SIGHUP` cannot force native shutdown. Paddock never uses `SIGTERM`, a second
-forceable shutdown, an expiry timeout kill, or daemon-stop to terminate model
-work. After the pinned native owner actually exits, the launcher may terminate
+`SIGHUP` cannot force native shutdown. For Codex idle release, Paddock never
+uses `SIGTERM`, a second forceable shutdown, an expiry timeout kill, or daemon-stop
+to terminate model work. After the pinned native owner actually exits, the launcher may terminate
 its disconnected TUI frontend. Paddock then confirms launcher exit, stops only the
 task's sandbox, and closes only its already-exited Rex block. Sibling tasks and
 user-added panes in the shared session remain intact.
@@ -188,17 +198,44 @@ without `SO_PEERPIDFD` retain the session. All supported client work must go
 through Paddock's gateway; manually bypassing it through the private native
 socket is outside the TTL contract.
 
+### Claude integration-only shutdown
+
+Claude TTL launches require Claude Code 2.1.325 and `paddock-claude-idle` in the
+runtime image. The launcher owns the native child and a private admission socket.
+Its native Stop hook must report no background work or scheduled tasks. The
+native transcript must then confirm successful completion of all Stop hooks and
+the completed turn boundary, with no later queued request or native activity.
+Saved history alone never qualifies: each launch requires a fresh live Stop
+observation. The full requested TTL begins when the poller confirms that turn;
+polling never extends an established deadline. This also works after resume,
+without relying on Claude's idle desktop notifications.
+
+Incoming delivery invalidates the observation before writing to Claude's native
+inbox. Native prompt, tool, approval, compaction and failure hooks invalidate it
+too. The host task operation lock serializes every integration delivery with
+expiry and resume. At expiry the launcher rechecks the exact generation,
+conversation, workspace, turn and epoch, closes admission, persists release intent,
+and sends one `SIGTERM` to its own native child for graceful shutdown. It never
+uses a forced timeout kill or repeats the signal. Native exit must be confirmed
+before sandbox and Rex-pane cleanup, using the same durable markers and public
+output checkpoint as Codex. A later integration message resumes the exact saved
+conversation and queues only the new work.
+
+This contract depends on integration-only input and the launch restrictions above;
+it does not cover manual TUI input, direct inbox writes, custom autonomous hooks,
+or processes launched outside Claude's tracked foreground work. Missing hooks,
+background work, pending input/approvals, changed history, failed exits and unknown
+state retain the session. Claude's SDK-only `CLAUDE_CODE_EXIT_AFTER_STOP_DELAY` is
+not used. See [native Stop hooks](https://code.claude.com/docs/en/hooks#stop).
+
 ### Deployment and agent limitations
 
-Opt-in launches require an updated runtime image containing `paddock-idle` and
-`python3-websockets`, plus the Paddock v8 runtime poller. An older poller is reported
-as incompatible; upgrades do not silently restart it. Existing sessions are not
-retrofitted with a gateway or TTL. No new resident host service is introduced.
+Opt-in launches require an updated runtime image containing `paddock-idle`,
+`paddock-claude-idle` and `python3-websockets`, plus the Paddock v9 runtime poller.
+An older poller is reported as incompatible; upgrades do not silently restart it.
+Existing sessions are not retrofitted. Claude 2.1.286 remains accepted for launches
+without a TTL; TTL launches on that version fail before starting the agent and
+require a rebuilt image. No new resident host service is introduced.
 
-Claude policy is validated and saved, but `idle.phase: unsupported` explains that
-its session is retained. Claude 2.1.286 has no qualified live atomic idle release
-interface: a Stop hook or transcript completion can precede continuation and
-cannot prove safe shutdown. See [Claude's Stop hook](https://code.claude.com/docs/en/hooks#stop).
-This preserves its interactive approvals and fails conservatively. Native Codex
-drain that cannot finish, or cleanup whose ownership/process state is unknown,
-is also retained for inspection, without forced termination.
+Native drains that cannot finish, or cleanup whose ownership/process state is
+unknown, are retained for inspection without forced termination.

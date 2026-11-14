@@ -1,5 +1,42 @@
 # OpenShell runtime acceptance
 
+## Claude 2.1.325 qualification — 2026-11-13
+
+New runtime images pin Claude Code 2.1.325. Version 2.1.286 remains accepted for
+existing images and host sessions. Isolated macOS and Linux PTY tests against the
+official 2.1.325 binaries, temporary Claude homes, and a local model fixture verified:
+
+- Explicit project trust in the private home starts the native interactive TUI.
+- Inbox delivery requires the exact persisted native enqueue record.
+- The public transcript reader recognizes completed turns and assistant output.
+- Exit and resume retain the conversation UUID; a new inbox accepts follow-up work.
+- An explicit native Bash ask rule displays the approval dialog without executing
+  the tool. No permission bypass flags are used.
+- `CLAUDE_CODE_EXIT_AFTER_STOP_DELAY=100` does not expire the interactive TUI.
+  This native setting remains SDK-only; Paddock owns the TTL countdown instead.
+- With `--idle-ttl`, the Bash and Agent schemas omit `run_in_background`, and
+  `--bg` is rejected through `CLAUDE_CODE_DISABLE_AGENT_VIEW`. The interactive
+  inbox, resume, output, and approval checks pass with and without this policy.
+- Live native Stop metadata, successful Stop-hook completion and the completed
+  turn boundary confirm idle. The launcher accepts expiry, confirms native exit,
+  then resumes the same conversation for the next message. Active model work and
+  approval waits reject stale expiry checkpoints. Resumed inbox-only turns work
+  without Claude's idle desktop notification, which is unreliable in this mode.
+
+Repeat this qualification without a real login or external model calls:
+
+```sh
+PADDOCK_NATIVE_CLAUDE=/path/to/claude go test ./internal/paddock \
+  -run '^TestNativeClaudeInboxAndResume$' -v -count=1
+```
+
+The non-TTL fixture also passed against 2.1.286; TTL requires 2.1.325. This
+qualifies the native protocol on macOS and Linux, not gateway OAuth refresh.
+Linux qualification used a disposable, read-only container with external networking
+disabled. The 28 Linux runtime protocol tests passed (five unrelated native Codex
+and WebSocket tests were skipped). No installed binaries, services, or existing
+tasks were changed during qualification.
+
 ## Runtime integration — 2026-11-03
 
 The implementation now defaults new tasks to OpenShell; legacy tasks stay on

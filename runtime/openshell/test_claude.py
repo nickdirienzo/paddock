@@ -13,6 +13,27 @@ message = importlib.machinery.SourceFileLoader('message', str(Path(__file__).wit
 
 @unittest.skipUnless(hasattr(socket, 'SO_PEERCRED'), 'Linux runtime peer credentials')
 class InboxTest(unittest.TestCase):
+    def test_idle_drain_rejects_delivery_before_native_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'claude-process.json').write_text(json.dumps({
+                'pid': os.getpid(), 'conversation': 'saved', 'generation': 2, 'idle_protocol': 1}))
+            with socket.socket(socket.AF_UNIX) as server:
+                server.bind(str(root / 'idle-control.sock'))
+                server.listen()
+                requests = []
+                def reject():
+                    with server.accept()[0] as connection:
+                        requests.append(json.loads(connection.makefile().readline()))
+                        connection.sendall(b'{"state":"offline"}\n')
+                worker = threading.Thread(target=reject)
+                worker.start()
+                self.assertEqual('offline', message.deliver(root, 'saved', 2, 'hello'))
+                worker.join(1)
+                self.assertEqual([{'op': 'delivery', 'generation': 2, 'thread': 'saved'}], requests)
+            # No control socket means no admission, even with native metadata.
+            self.assertEqual('offline', message.deliver(root, 'saved', 2, 'hello'))
+
     def test_native_admission_evidence(self):
         for admission in ('queued', 'held', 'refused'):
             with self.subTest(admission=admission), tempfile.TemporaryDirectory() as directory:

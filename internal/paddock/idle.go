@@ -35,6 +35,34 @@ func NormalizeIdleTTL(value string) (string, error) {
 	return duration.String(), nil
 }
 
+// TTL launches keep native work in the foreground. The runtime also disallows
+// Monitor and requires live Stop metadata and native turn completion before expiry.
+func claudeIdleEnv(t Task) []string {
+	if t.IdleTTL == "" || t.Session.Agent != "claude" {
+		return nil
+	}
+	return []string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
+		"CLAUDE_CODE_DISABLE_CRON=1", "CLAUDE_CODE_DISABLE_MCP_TASKS=1", "CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0"}
+}
+
+func checkClaudeIdleRuntime(ctx context.Context, task Task) error {
+	if task.IdleTTL == "" || task.Session.Agent != "claude" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	probe := `import pathlib,subprocess
+helper=pathlib.Path('/usr/local/bin/paddock-claude-idle')
+assert helper.is_file()
+assert 'paddock-claude-idle' in pathlib.Path('/usr/local/bin/paddock-agent').read_text()
+assert subprocess.check_output(['/usr/local/bin/claude','--version'],text=True,timeout=5).strip()=='2.1.325 (Claude Code)'
+`
+	if _, err := sandboxOutput(ctx, task, "python3", "-c", probe); err != nil {
+		return fmt.Errorf("Claude idle TTL requires an updated runtime image with Claude Code 2.1.325 and paddock-claude-idle; rebuild the runtime image: %w", err)
+	}
+	return nil
+}
+
 func codexControlEndpoint(t Task) string {
 	if t.IdleTTL != "" {
 		return "unix://" + agentControlDir(t) + "/idle-rpc.sock"
@@ -86,7 +114,7 @@ func idleRuntime(ctx context.Context, t Task, operation string) (idleRuntimeStat
 // existing sessions: only explicitly opted-in launches have an admission fence.
 func (s Service) ReconcileIdle(ctx context.Context) error {
 	return s.reconcileIdle(ctx, time.Now().UTC(), idleChecks{
-		runtime: idleRuntime, output: codexOutput, finish: s.finishIdle, now: time.Now,
+		runtime: idleRuntime, output: idleOutput, finish: s.finishIdle, now: time.Now,
 		access: func(ctx context.Context, t Task) error { _, err := s.SyncAccess(ctx, t); return err },
 	})
 }
@@ -127,7 +155,7 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 				return nil
 			}
 			state := IdleState{Generation: t.Session.Generation, Phase: "waiting"}
-			if t.RuntimeName() != "openshell" || t.Session.Agent != "codex" {
+			if t.RuntimeName() != "openshell" || (t.Session.Agent != "codex" && t.Session.Agent != "claude") {
 				state.Phase, state.Error = "unsupported", "no verified native idle release for this runtime/agent; session retained"
 				return s.saveIdle(t, state)
 			}
@@ -253,6 +281,13 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 		}
 	}
 	return first
+}
+
+func idleOutput(ctx context.Context, task Task) ([]OutputEvent, error) {
+	if task.Session.Agent == "claude" {
+		return claudeOutput(ctx, task)
+	}
+	return codexOutput(ctx, task)
 }
 
 func (s Service) saveIdle(t Task, state IdleState) error {

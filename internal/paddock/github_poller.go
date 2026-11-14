@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 8 // v8 reconciles opt-in native idle TTLs.
+const githubPollerVersion = 9 // v9 reconciles integration-only Claude idle TTLs too.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.

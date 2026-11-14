@@ -44,7 +44,7 @@ Opt in to per-task process expiry with `run --idle-ttl 24h` (also supported by
 countdown follows confirmed native turn completion; status polling does not
 extend it. Children opt in separately. See [lifecycle and supported
 runtimes](lifecycle.md#opt-in-idle-process-expiry) for native shutdown safety,
-recovery, and the conservative Claude limitation.
+recovery, and Claude’s integration-only input contract.
 
 For a multiline goal, pass `-`, paste the prompt, and press Ctrl-D to send EOF:
 
@@ -195,7 +195,7 @@ paddock repo untrust project
 
 Both commands accept an alias or a repository path. Trust is opt-in and belongs to the canonical Git common directory, so linked worktrees and delegated children share the decision. Removing an alias does not revoke trust; use `untrust` first, or pass the repository path afterward.
 
-For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. For new OpenShell Claude tasks, Paddock records the same opt-in trust decision in that task's isolated Claude config before launch. Claude 2.1.286 keeps this decision in its private `projects.<path>.hasTrustDialogAccepted` state; Paddock changes only that field and leaves native tool approvals enabled. It does not edit your host Claude or Codex config or add permission bypass flags. Rex Remote Control is a separate app setting.
+For new Codex tasks, Paddock passes the task worktree's `projects.<path>.trust_level` setting through `--config`. For new OpenShell Claude tasks, Paddock records the same opt-in trust decision in that task's isolated Claude config before launch. Claude 2.1.286 and 2.1.325 keep this decision in the private `projects.<path>.hasTrustDialogAccepted` state; Paddock changes only that field and leaves native tool approvals enabled. It does not edit your host Claude or Codex config or add permission bypass flags. Rex Remote Control is a separate app setting.
 
 Existing sessions keep their launch settings. `untrust` stops Paddock from supplying trust to future tasks; it does not revoke trust you independently saved in either agent.
 

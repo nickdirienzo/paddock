@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Claude Code 2.1.286 has no CLI option for project trust. Its isolated
+// Qualified Claude versions have no CLI option for project trust. The isolated
 // OpenShell home starts with a small, image-owned config, so we record only the
 // trust decision explicitly granted through `paddock repo trust` before launch.
 // Tool permissions remain under Claude's normal approval policy.

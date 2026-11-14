@@ -96,6 +96,16 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 
 func agentControlEnv(task Task) []string {
 	env := credentialFreeEnvironment(os.Environ())
+	for _, value := range claudeIdleEnv(task) {
+		key, _, _ := strings.Cut(value, "=")
+		filtered := env[:0]
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, key+"=") {
+				filtered = append(filtered, entry)
+			}
+		}
+		env = append(filtered, value)
+	}
 	if task.Session.AgentHome != "" {
 		key := "CODEX_HOME"
 		if task.Session.Agent == "claude" {

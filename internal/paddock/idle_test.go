@@ -29,6 +29,69 @@ func TestIdleTTLValidation(t *testing.T) {
 	}
 }
 
+func TestClaudeIdleLaunchDisablesBackgroundWork(t *testing.T) {
+	for _, key := range []string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "CLAUDE_CODE_DISABLE_AGENT_VIEW"} {
+		t.Setenv(key, "0")
+	}
+	for _, agent := range []string{"claude", "codex"} {
+		for _, ttl := range []string{"", "1h"} {
+			for _, profile := range []string{"implementation", "investigation"} {
+				for _, resume := range []bool{false, true} {
+					task := taskFixture()
+					task.Runtime, task.IdleTTL, task.Provenance.Profile = "openshell", ttl, profile
+					task.Session.Agent, task.Session.Resume = agent, resume
+					task.Session.AgentPath = "/usr/local/bin/" + agent
+					task.OpenShell = &OpenShellTask{Config: OpenShellConfig{Binary: "/bin/echo"}}
+					command := AgentCommand(task, "/state", "/paddock")
+					args := strings.Join(command.Args, " ")
+					for _, key := range []string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "CLAUDE_CODE_DISABLE_AGENT_VIEW"} {
+						want := agent == "claude" && ttl != ""
+						if strings.Contains(args, "--env "+key+"=1") != want {
+							t.Fatalf("agent=%s ttl=%q profile=%s resume=%t: %v", agent, ttl, profile, resume, command.Args)
+						}
+						// Legacy host commands override an inherited opt-out once,
+						// while ordinary launches preserve the caller's setting.
+						task.Runtime = "host"
+						values := []string{}
+						for _, entry := range AgentCommand(task, "/state", "/paddock").Env {
+							if strings.HasPrefix(entry, key+"=") {
+								values = append(values, entry)
+							}
+						}
+						expected := key + "=0"
+						if want {
+							expected = key + "=1"
+						}
+						if len(values) != 1 || values[0] != expected {
+							t.Fatal("wrong host launch environment", values)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestClaudeIdleRequiresUpdatedRuntimeBeforeModelLaunch(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		task := taskFixture()
+		task.Runtime, task.IdleTTL, task.Session.Agent = "openshell", "1h", "claude"
+		task.OpenShell = &OpenShellTask{Config: OpenShellConfig{Binary: script(t, "exit 1")}}
+		if supported {
+			task.OpenShell.Config.Binary = script(t, "exit 0")
+		}
+		err := checkClaudeIdleRuntime(context.Background(), task)
+		if (err == nil) != supported || (err != nil && !strings.Contains(err.Error(), "rebuild the runtime image")) {
+			t.Fatal(supported, err)
+		}
+		task.IdleTTL = ""
+		task.OpenShell = nil
+		if err := checkClaudeIdleRuntime(context.Background(), task); err != nil {
+			t.Fatal("ordinary launch gained an idle-runtime dependency", err)
+		}
+	}
+}
+
 func idleFixture(t *testing.T) (Service, Task, time.Time) {
 	t.Helper()
 	service := Service{Store: openTestStore(t, t.TempDir())}
@@ -62,7 +125,16 @@ func idleTestChecks(t *testing.T, state *idleRuntimeState, expired *int) idleChe
 }
 
 func TestIdleCountdownPollingRestartAndExpiry(t *testing.T) {
+	for _, agent := range []string{"codex", "claude"} {
+		t.Run(agent, func(t *testing.T) { testIdleCountdownPollingRestartAndExpiry(t, agent) })
+	}
+}
+
+func testIdleCountdownPollingRestartAndExpiry(t *testing.T, agent string) {
 	s, task, clock := idleFixture(t)
+	if err := s.Store.update(task.ID, func(v *Task) error { v.Session.Agent = agent; return nil }); err != nil {
+		t.Fatal(err)
+	}
 	native, expired := idleRuntimeState{State: "completed", Epoch: "runtime-1", TurnID: "turn"}, 0
 	checks := idleTestChecks(t, &native, &expired)
 	pass := func(clock time.Time) Task {
@@ -189,14 +261,14 @@ func TestIdlePendingWorkAndDeliverySerialize(t *testing.T) {
 }
 
 func TestIdleNoDefaultNoInheritanceAndUnsupported(t *testing.T) {
-	for _, variant := range []string{"no policy", "claude"} {
+	for _, variant := range []string{"no policy", "host"} {
 		t.Run(variant, func(t *testing.T) {
 			s, task, clock := idleFixture(t)
 			_ = s.Store.update(task.ID, func(v *Task) error {
 				if variant == "no policy" {
 					v.IdleTTL = ""
 				} else {
-					v.Session.Agent = "claude"
+					v.Runtime = "host"
 				}
 				return nil
 			})
@@ -208,7 +280,7 @@ func TestIdleNoDefaultNoInheritanceAndUnsupported(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := s.Store.Get(task.ID)
-			if variant == "claude" && (got.Idle == nil || got.Idle.Phase != "unsupported") {
+			if variant == "host" && (got.Idle == nil || got.Idle.Phase != "unsupported") {
 				t.Fatal(got.Idle)
 			}
 			if variant == "no policy" && got.Idle != nil {
@@ -364,12 +436,19 @@ esac`)
 }
 
 func TestIdleFollowupMessageResumesPinnedConversation(t *testing.T) {
+	for _, agent := range []string{"codex", "claude"} {
+		t.Run(agent, func(t *testing.T) { testIdleFollowupMessageResumesPinnedConversation(t, agent) })
+	}
+}
+
+func testIdleFollowupMessageResumesPinnedConversation(t *testing.T, agent string) {
 	s, task, _ := idleFixture(t)
 	task.Status = "stopped"
 	task.Worktree = "/sandbox/worktree"
 	task.Prompt = "ORIGINAL ASSIGNMENT MUST NOT REPLAY"
-	task.Session.AgentPath = "/usr/local/bin/codex"
-	task.Session.AgentHome = "/home/sandbox/.codex"
+	task.Session.Agent = agent
+	task.Session.AgentPath = "/usr/local/bin/" + agent
+	task.Session.AgentHome = "/home/sandbox/." + agent
 	task.Session.Backend = "rex"
 	task.Session.ID = "session:family"
 	task.Session.BlockID = "block:old"
@@ -377,6 +456,7 @@ func TestIdleFollowupMessageResumesPinnedConversation(t *testing.T) {
 	task.Session.ExitCode = new(int)
 	task.Idle = &IdleState{Generation: 1, Phase: "expired", PaneClosed: true, DrainConfirmed: true}
 	log, active := filepath.Join(t.TempDir(), "calls"), filepath.Join(t.TempDir(), "active")
+	messageBody := filepath.Join(t.TempDir(), "message")
 	task.OpenShell = &OpenShellTask{Name: "pd-fixture", Ready: true, Config: OpenShellConfig{Gateway: "fixture", Workspace: "default"}}
 	task.OpenShell.Config.Binary = script(t, `printf '%s\n' "$*" >> `+quote(log)+`
 case "$*" in
@@ -394,6 +474,7 @@ case "$*" in
  *'symbolic-ref --quiet HEAD') printf '%s' `+quote("refs/heads/"+task.Branch)+`;;
  *'paddock-codex-state owner '*) printf '{"owner":true}';;
  *'paddock-codex-state start-queued '*) printf '{"owner":true}';;
+ *'paddock-claude-message '*) cat >> `+quote(messageBody)+`; printf queued;;
  *) exit 0;;
 esac`)
 	// Simulate the terminal adapter's supervisor claim without starting any real
@@ -438,8 +519,20 @@ esac`)
 		t.Fatal(args)
 	}
 	calls, _ := os.ReadFile(log)
-	if strings.Count(string(calls), "queue --thread "+task.Session.ConversationID+" --message FOLLOWUP ONLY") != 1 || strings.Contains(string(calls), task.Prompt) || !strings.Contains(string(calls), "--remote unix:///sandbox/idle-rpc.sock") {
+	if strings.Contains(string(calls), task.Prompt) {
 		t.Fatal(string(calls))
+	}
+	if agent == "codex" {
+		if strings.Count(string(calls), "queue --thread "+task.Session.ConversationID+" --message FOLLOWUP ONLY") != 1 || !strings.Contains(string(calls), "--remote unix:///sandbox/idle-rpc.sock") {
+			t.Fatal(string(calls))
+		}
+	} else {
+		data, err := os.ReadFile(messageBody)
+		var body struct{ Message string }
+		if err != nil || json.Unmarshal(data, &body) != nil || body.Message != "FOLLOWUP ONLY" ||
+			strings.Count(string(calls), "paddock-claude-message "+task.Session.ConversationID+" 2") != 1 {
+			t.Fatal("Claude follow-up lost or replayed", string(data), string(calls), err)
+		}
 	}
 }
 

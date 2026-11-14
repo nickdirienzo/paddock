@@ -158,7 +158,13 @@ outcomes must still be inspected. If operation-lock contention prevents the
 initial message claim, the command fails before producing a receipt; retry the
 same external ID. Once a receipt exists, confirmed offline outcomes are `pending`.
 
-Automatic enforcement currently supports qualified OpenShell Codex runtimes.
-Claude TTL tasks report `unsupported` and remain running. Updated images and the
-v8 runtime poller are required; Paddock does not install them or restart services
-automatically. See [verified shutdown, recovery and limitations](lifecycle.md#opt-in-idle-process-expiry).
+Automatic enforcement supports qualified OpenShell Codex runtimes and Claude
+2.1.325 integration-only sessions. For Claude, integrations such as Arnold use
+`run --agent claude --idle-ttl 24h --json --detach ...` and the existing `message`
+contract unchanged. Submit all input through Paddock; direct TUI input and direct
+native inbox writes are outside the TTL contract. Claude TTL launches disable
+background/autonomous work and retain native foreground subagents and approvals.
+The full TTL starts after confirmed native completion. Updated runtime images
+and the v9 poller are required; Paddock
+does not install them or restart services automatically. See
+[verified shutdown, recovery and limitations](lifecycle.md#opt-in-idle-process-expiry).

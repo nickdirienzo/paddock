@@ -140,6 +140,11 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if err = checkClaudeIdleRuntime(context.Background(), t); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = store.Finish(t.ID, 1, err.Error())
+		return 1
+	}
 	hookTrust := ""
 	if t.RuntimeName() == "host" {
 		miseCtx, miseCancel := context.WithTimeout(context.Background(), 10*time.Second)

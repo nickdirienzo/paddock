@@ -2,7 +2,7 @@
 
 Paddock can poll explicitly watched pull requests and route comments to their owning
 local tasks. Codex uses its native session queue and Claude uses its native inbox
-inside OpenShell. The OpenShell image requires qualified Claude Code 2.1.286. Claude's peer-message
+inside OpenShell. New OpenShell images pin Claude Code 2.1.325; 2.1.286 remains accepted. Claude's peer-message
 admission and tool approvals remain in force. Delivery requires a persisted native
 enqueue record; uncertain deliveries are held for inspection. Delegation uses the
 existing task/worktree launcher.
