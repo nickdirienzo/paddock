@@ -74,36 +74,6 @@ func TestNewTaskPreservesLiteralPromptAndSelectedRuntime(t *testing.T) {
 	}
 }
 
-func TestNewTaskRuntimeStartsAtConfiguredDefault(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "state")
-	if got, err := newTaskRuntime(home, ""); err != nil || got != "openshell" {
-		t.Fatal(got, err)
-	}
-	if _, err := os.Stat(home); !os.IsNotExist(err) {
-		t.Fatal("reading default created state", err)
-	}
-	if err := os.MkdirAll(home, 0700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(home, "runtime.json")
-	body := []byte("{\"default\":\"host\"}\n")
-	if err := os.WriteFile(path, body, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newTaskRuntime(home, ""); err == nil {
-		t.Fatal("accepted legacy host default")
-	}
-	if _, err := newTaskRuntime(home, "host"); err == nil {
-		t.Fatal("accepted host runtime")
-	}
-	if got, err := newTaskRuntime(home, "openshell"); err != nil || got != "openshell" {
-		t.Fatal(got, err)
-	}
-	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, body) {
-		t.Fatal("changed the saved default", string(got), err)
-	}
-}
-
 func TestNewFormShowsAndSelectsAgents(t *testing.T) {
 	draft := newTaskDraft{Repo: "/project", Agent: "codex", Runtime: "openshell", Start: true}
 	form := newTaskForm(&draft, []repositoryChoice{{"Project", "/project"}}, t.TempDir(), "")

@@ -13,14 +13,13 @@ import (
 
 const runtimeHelp = `paddock runtime show
 paddock runtime check
-paddock runtime default [openshell]
+paddock runtime default [openshell|host]
 paddock runtime configure --binary /path/to/openshell --gateway NAME
   --image REPOSITORY@sha256:DIGEST --policy /path/to/policy.json
   [--workspace default] [--config-home DIR] [--state-home DIR] [--tls-dir DIR]
   [--codex-provider NAME] [--codex-account-id ID] [--claude-provider NAME] [--allow engineer1,engineer2] [--memory 24Gi] [--cpu 8]
 
-Agent tasks run in OpenShell. Existing host tasks remain inspectable but cannot
-resume. Configuration contains references, never secrets.
+Agent tasks default to OpenShell; host runs use native local agents. Configuration contains references, never secrets.
 Build the agent image and configure model providers using docs/openshell.md first.
 Use --allow '*' for any GitHub user or bot on automatically discovered PR watches.
 Paddock's own App identity and marked replies remain excluded.
@@ -54,7 +53,7 @@ func runRuntime(args []string, out io.Writer) error {
 	switch args[0] {
 	case "default":
 		if len(flags) != 0 {
-			return fmt.Errorf("runtime default accepts only openshell")
+			return fmt.Errorf("runtime default accepts openshell or host")
 		}
 		if len(pos) == 1 {
 			if e = s.SetDefaultRuntime(pos[0]); e != nil {

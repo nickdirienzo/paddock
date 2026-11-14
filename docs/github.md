@@ -12,7 +12,7 @@ existing task/worktree launcher.
 ### Create a named Paddock identity and register its App
 
 An identity is a logical Paddock principal. It has a local operating-system owner,
-an allowed execution profile list, and optional GitHub credentials. The GitHub
+a named launcher configuration, and optional GitHub credentials. The GitHub
 actor, requester, and model-provider credentials are separate fields. Each
 engineer can create a different identity; service workflows can use their own
 identity owned by the local service account.
@@ -23,7 +23,7 @@ push capability, or PR capability. Associate an App before using that identity
 for GitHub work.
 
 ```sh
-paddock identity create mozzie --profiles investigation,implementation
+paddock identity create mozzie --launcher implementation
 paddock identity github setup mozzie --app-name mozziebot --visibility any
 ```
 
@@ -37,7 +37,7 @@ your personal account. `--visibility owner` is the default. Use `any` only if
 the App needs installations outside the owning account.
 
 The manifest requests Contents, Pull requests, and Issues `read` for an
-investigation-only identity, or `write` if implementation is allowed. It disables
+read-only launcher, or `write` for a writable launcher. It disables
 webhooks and user authorization. GitHub requires a human to install the new App
 and select the repositories. After registration, `setup` prints the App install
 URL, App ID, protected key path, and the commands to discover installations and
@@ -58,14 +58,14 @@ login and numeric bot user ID. New OpenShell worktrees set their Git author to
 The App installation token authenticates pushes and PR creation as that bot.
 `verify --repo` repeats the live authentication check, confirms the
 installation can read that repository, and asks GitHub to mint a scoped token
-for each profile the identity permits. It discards those tokens immediately.
+for the identity's configured launcher. It discards those tokens immediately.
 `github repositories` lists the
 installation's current repository access. Select the identity when
 starting a task; the repository route is only a default for commands that omit
 `--identity`:
 
 ```sh
-paddock run --repo project --identity mozzie --profile implementation \
+paddock run --repo project --identity mozzie --launcher implementation \
   --json 'Implement the change'
 ```
 
@@ -247,16 +247,11 @@ list. Paddock's own App identity and Paddock-marked replies remain excluded to p
 loops. The wildcard must be used alone. Existing watches remain restricted until you
 update them; re-run `watch` with named user or bot accounts to narrow access.
 Status exposes this policy as `allow_any_user: true`.
-Legacy host task records report `unsupported` for comment delivery. Their
-comments stay pending because those agents cannot be restarted outside
-OpenShell.
-After upgrading, restart any running poller with the upgraded CLI's `github stop`
-and `github start` commands before registering wildcard watches. Registration
-refuses an older running poller rather than saving a policy it cannot enforce.
-The identity and OpenShell-only release also requires a version-7 poller before
-new tasks launch. After that restart, watches for legacy host tasks remain
-registered but cannot deliver comments; finish those tasks before cutting over
-if their watches still need delivery.
+Host and OpenShell tasks support native comment delivery and resume. After
+upgrading, restart the shared poller with `paddock github stop` and
+`paddock github start`. This release requires poller version 11 for host delivery,
+launcher settings, and per-session Codex TUI settings. Registration rejects an
+older running poller.
 
 Registering a watch starts or reuses **one background poller per registry**. It survives
 the registering CLI and individual agents exiting. It does not start automatically at

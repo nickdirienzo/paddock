@@ -130,12 +130,11 @@ func runGitHubManifestSetup(name string, args []string, out io.Writer) error {
 	if owner != "" {
 		endpoint = "https://github.com/organizations/" + url.PathEscape(owner) + "/settings/apps/new?state=" + csrf
 	}
-	write := len(identity.Profiles) == 0
-	for _, p := range identity.Profiles {
-		if p == "implementation" {
-			write = true
-		}
+	config, err := store.LauncherConfig(identity.Launcher)
+	if err != nil {
+		return err
 	}
+	write := !config.ReadOnly
 	manifest, err := json.Marshal(appManifest(appName, base+"/callback", write, visibility == "any"))
 	if err != nil {
 		return err

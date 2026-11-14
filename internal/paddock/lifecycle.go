@@ -121,14 +121,20 @@ func (s *Store) TouchActivity(id string) error {
 }
 
 func (s Service) Resume(ctx context.Context, id string) (Task, error) {
+	return s.ResumeWithCodexTUI(ctx, id, "")
+}
+
+// ResumeWithCodexTUI changes presentation for a stopped session without changing
+// its conversation or pinned execution settings. Running agents are never restarted.
+func (s Service) ResumeWithCodexTUI(ctx context.Context, id, mode string) (Task, error) {
+	if err := validateCodexTUI(mode); err != nil {
+		return Task{}, err
+	}
 	t, err := s.Store.Get(id)
 	if err != nil {
 		return t, err
 	}
-	if t.RuntimeName() != "openshell" {
-		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
-	}
-	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
+	if t.ReadOnly() && !investigationGuardReady(t) {
 		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
 	}
 	release, err := s.Store.taskLease(t.ID, "operation")
@@ -136,6 +142,22 @@ func (s Service) Resume(ctx context.Context, id string) (Task, error) {
 		return t, err
 	}
 	defer release()
+	if mode != "" && mode != codexTUIMode(t) {
+		if t.Session.Agent != "codex" {
+			return t, fmt.Errorf("codex-tui applies only to Codex sessions")
+		}
+		var obs Observation
+		t, obs, err = s.Refresh(ctx, t)
+		if err != nil {
+			return t, err
+		}
+		if obs.State == "running" || obs.State == "unknown" {
+			return t, fmt.Errorf("cannot change Codex TUI while the terminal is running or its state is unknown; use /tui in Codex, or exit the agent and resume with --codex-tui %s", mode)
+		}
+		if err = s.Store.UpdateSession(t.ID, func(v *Session) { v.CodexTUI = mode }); err != nil {
+			return t, err
+		}
+	}
 	return s.resumeLocked(ctx, t.ID)
 }
 
@@ -159,10 +181,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	if t.Idle != nil && (t.Idle.Phase == "releasing" || t.Idle.Phase == "draining") {
 		return t, fmt.Errorf("native idle release is being reconciled; retry after task stops")
 	}
-	if t.RuntimeName() != "openshell" {
-		return t, fmt.Errorf("host agent task %s cannot resume; LLM execution requires OpenShell", t.ID)
-	}
-	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
+	if t.ReadOnly() && !investigationGuardReady(t) {
 		return t, fmt.Errorf("investigation task %s has no verified read-only guard; create a new task", t.ID)
 	}
 	t, obs, err := s.Refresh(ctx, t)

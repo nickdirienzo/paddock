@@ -2,9 +2,12 @@ package paddock
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+var errNoGitHubIdentity = errors.New("no GitHub identity is mapped")
 
 // A binding pins a public principal, not its key or rotating installation token.
 // Rotating the key is safe; replacing the principal must not redirect queued posts.
@@ -42,7 +45,7 @@ func (s GitHubState) ResolveGitHubIdentity(repo string) (GitHubIdentityBinding, 
 			return bindGitHubIdentity(name, i), i, nil
 		}
 	}
-	return GitHubIdentityBinding{}, GitHubIdentity{}, fmt.Errorf("no GitHub identity is mapped to %s; use paddock github route", repo)
+	return GitHubIdentityBinding{}, GitHubIdentity{}, fmt.Errorf("%w to %s; use paddock github route", errNoGitHubIdentity, repo)
 }
 func (s GitHubState) boundIdentity(b GitHubIdentityBinding) (GitHubIdentity, error) {
 	i, ok := s.Identities[b.Name]

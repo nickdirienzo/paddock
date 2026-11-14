@@ -1,9 +1,11 @@
 # OpenShell runtime
 
-All new agent tasks run in OpenShell. Explicit `--runtime host` and saved host
-defaults are rejected. Existing host tasks remain inspectable but cannot resume.
-Missing sandbox setup fails with setup instructions. `paddock runtime default`
-prints the current choice and accepts only `openshell`.
+OpenShell is the default runtime when no launcher mapping or runtime preference
+is configured. Identities select [named launcher configs](launchers.md), which
+can use OpenShell or native host agents. Explicit `--runtime host` selects the
+host. Host tasks support native follow-up and resume, including older tasks.
+OpenShell setup failures report an error; they never silently fall back to host.
+`paddock runtime default openshell|host` sets the operator fallback.
 
 ## Setup
 

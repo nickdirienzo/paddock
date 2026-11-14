@@ -12,7 +12,7 @@ import (
 func TestIdentityCLIWithoutGitHub(t *testing.T) {
 	t.Setenv("PADDOCK_HOME", t.TempDir())
 	var out bytes.Buffer
-	if err := runIdentity([]string{"create", "mozzie", "--profiles", "investigation"}, &out); err != nil {
+	if err := runIdentity([]string{"create", "mozzie", "--launcher", "investigation"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
@@ -20,14 +20,14 @@ func TestIdentityCLIWithoutGitHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	var identity struct {
-		Mode     string   `json:"mode"`
-		Owner    string   `json:"owner"`
-		Profiles []string `json:"profiles"`
+		Mode     string `json:"mode"`
+		Owner    string `json:"owner"`
+		Launcher string `json:"launcher"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &identity); err != nil {
 		t.Fatal(err)
 	}
-	if identity.Mode != "" || identity.Owner == "" || len(identity.Profiles) != 1 || identity.Profiles[0] != "investigation" {
+	if identity.Mode != "" || identity.Owner == "" || identity.Launcher != "investigation" {
 		t.Fatalf("incorrect logical identity: %+v", identity)
 	}
 }
@@ -74,7 +74,7 @@ func TestAssociateRequiresUnbackedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("mozzie", caller, nil); err != nil {
+	if err := store.CreateIdentity("mozzie", caller, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpdateGitHub(func(v *paddock.GitHubState) error {
@@ -103,7 +103,7 @@ func TestGitHubCLIHidesAndProtectsOtherOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("other", "999999:other", nil); err != nil {
+	if err := store.CreateIdentity("other", "999999:other", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpdateGitHub(func(v *paddock.GitHubState) error {

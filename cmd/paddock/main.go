@@ -17,12 +17,14 @@ import (
 
 const help = `Paddock — a local control plane for coding agents
 
+  paddock tp [--agent codex|claude] [--terminal auto|rex|screen] [--json] [--detach]
+  paddock launcher list|show|configure
   paddock new [--repo name-or-path] [--agent codex|claude]
   paddock rex setup|remove [--config path] [--key shortcut]
   paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
-                           [--identity name] [--profile investigation|implementation]
+                           [--identity name] [--launcher name] [--codex-tui default|scrollback|fullscreen]
                            [--requester id] [--requester-source service] [--external-id id] [--context-file JSON]
-                           [--idle-ttl duration] [--runtime openshell] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
+                           [--idle-ttl duration] [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
   paddock message <id> "message" [--external-id id] [--json]
   paddock tasks [--json]
@@ -31,9 +33,9 @@ const help = `Paddock — a local control plane for coding agents
   paddock artifacts <id> [--json]
   paddock attach [<id>] [--client Rex-client-id]
   paddock shell-setup <id>
-  paddock resume <id> [--json] [--detach] [--client Rex-client-id]
+  paddock resume <id> [--codex-tui default|scrollback|fullscreen] [--json] [--detach] [--client Rex-client-id]
   paddock access pending|show|approve|reject
-  paddock identity create|list|show|disable|enable|verify
+  paddock identity create|configure|list|show|disable|enable|verify
   paddock runtime show|configure|check|default
   paddock gc [--apply] [--json]
   paddock lifecycle show|configure
@@ -179,8 +181,8 @@ func printTask(w io.Writer, t paddock.Task) {
 	if t.Provenance.Identity != "" {
 		fmt.Fprintln(w, "Paddock identity:", t.Provenance.Identity)
 	}
-	if t.Provenance.Profile != "" {
-		fmt.Fprintln(w, "Profile:", t.Provenance.Profile)
+	if t.Provenance.Launcher != "" {
+		fmt.Fprintln(w, "Launcher:", t.Provenance.Launcher)
 	}
 	if len(t.Provenance.Capabilities) > 0 {
 		fmt.Fprintln(w, "Capabilities:", strings.Join(t.Provenance.Capabilities, ", "))
@@ -228,6 +230,12 @@ func run(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "tp" {
+		return runTP(args[1:], out)
+	}
+	if command == "launcher" {
+		return runLauncher(args[1:], out)
+	}
 	if command == "new" {
 		return runNew(args[1:], out)
 	}
@@ -267,7 +275,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity profile requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity profile requester requester-source external-id context-file json", "resume": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity launcher codex-tui requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity launcher codex-tui requester requester-source external-id context-file json", "resume": "json detach client codex-tui", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -388,7 +396,7 @@ func run(args []string, out io.Writer) error {
 		}
 		return emit(out, artifacts)
 	case "resume":
-		t, err := service.Resume(ctx, pos[0])
+		t, err := service.ResumeWithCodexTUI(ctx, pos[0], o["codex-tui"])
 		if err != nil {
 			return err
 		}
@@ -414,7 +422,7 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, IdleTTL: o["idle-ttl"], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Profile: o["profile"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
+		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, IdleTTL: o["idle-ttl"], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Launcher: o["launcher"], CodexTUI: o["codex-tui"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
 		if err != nil {
 			return err
 		}

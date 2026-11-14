@@ -25,7 +25,7 @@ var investigationLaunch []byte
 // worktree. OpenShell remains the outer sandbox; each agent process adds a
 // second, write-restricting Landlock layer before it starts its native daemon.
 func installInvestigationGuard(ctx context.Context, t Task, hostDir string) error {
-	if t.Provenance.Profile != "investigation" {
+	if !t.ReadOnly() {
 		return nil
 	}
 	if t.OpenShell == nil {

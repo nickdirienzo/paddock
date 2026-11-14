@@ -124,22 +124,31 @@ esac
 	return GitHubCoordinator{Service: service, Remote: remote}, remote, s, w, log
 }
 
-func TestLegacyHostWatchLeavesCommentsPending(t *testing.T) {
+func TestHostWatchDeliversNativeMessages(t *testing.T) {
 	g, remote, store, watch, log := githubFixture(t)
 	g.Service.messageDelivery = nil
 	remote.comments = []GitHubComment{testComment(404, "please continue", 7)}
-	if state := g.Service.WatchSessionState(context.Background(), watch.TaskID); state != "unsupported" {
-		t.Fatalf("legacy host watch state = %q", state)
+	if state := g.Service.WatchSessionState(context.Background(), watch.TaskID); state != "online" {
+		t.Fatal(state)
 	}
-	if events, err := g.Poll(context.Background()); err != nil || len(events) != 0 {
-		t.Fatalf("legacy host comment was consumed: %+v %v", events, err)
+	events, err := g.Poll(context.Background())
+	if err != nil || len(events) != 1 || events[0].Status != "done" {
+		t.Fatal(events, err)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(data), "please continue") {
+		t.Fatal(string(data), err)
+	}
+	if _, err := g.Poll(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	state, err := store.GitHubState()
-	if err != nil || len(state.Events) != 0 || remote.reactionCalls != 0 {
-		t.Fatalf("legacy host watch changed: %+v %v", state.Events, err)
+	if err != nil || len(state.Events) != 1 {
+		t.Fatal(state.Events, err)
 	}
-	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Fatalf("legacy host agent was messaged: %v", err)
+	data, err = os.ReadFile(log)
+	if err != nil || strings.Count(string(data), "queue --thread") != 1 {
+		t.Fatal(string(data), err)
 	}
 }
 

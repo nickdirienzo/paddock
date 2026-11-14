@@ -37,7 +37,7 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 		prompt = teamPrincipalPrompt(t, home, exe)
 	}
 	// Preserve the agent's configured authentication, approval, and sandbox policy.
-	args := []string{}
+	args := codexTUIArgs(t)
 	if t.RuntimeName() == "openshell" && t.Session.Agent == "codex" {
 		// OpenShell is the isolation boundary; nested Bubblewrap cannot create
 		// namespaces here. Keep native approval decisions enabled.
@@ -83,7 +83,7 @@ func AgentCommand(t Task, home, exe string, overrides ...string) *exec.Cmd {
 	}
 	if t.RuntimeName() == "openshell" {
 		launcher := []string{"/usr/local/bin/paddock-agent", fmt.Sprint(t.Session.Generation), t.Session.AgentPath}
-		if t.Provenance.Profile == "investigation" {
+		if t.ReadOnly() {
 			launcher = []string{"/usr/bin/python3", investigationGuardDir + "/launch.py", fmt.Sprint(t.Session.Generation), investigationGuardDir + "/" + t.Session.Agent}
 		}
 		remote := append(launcher, args...)
@@ -118,11 +118,7 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if t.RuntimeName() != "openshell" {
-		fmt.Fprintln(os.Stderr, "host agent execution is unavailable; use OpenShell")
-		return 1
-	}
-	if t.Provenance.Profile == "investigation" && !investigationGuardReady(t) {
+	if t.ReadOnly() && !investigationGuardReady(t) {
 		fmt.Fprintln(os.Stderr, "investigation task has no verified read-only guard")
 		return 1
 	}

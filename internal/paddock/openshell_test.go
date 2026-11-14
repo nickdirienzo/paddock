@@ -69,15 +69,12 @@ func TestVerifyExecutionProfilesChecksGitHubGrant(t *testing.T) {
 	auth.baseURL = server.URL
 	api := GitHubAPI{Identity: GitHubIdentity{Mode: "app"}, app: auth}
 	for _, profile := range []string{"investigation", "implementation"} {
-		if err := api.VerifyExecutionProfile(context.Background(), "team/project", profile); err != nil {
+		if err := api.VerifyExecutionAccess(context.Background(), "team/project", profile == "investigation"); err != nil {
 			t.Fatal(profile, err)
 		}
 	}
 	if calls != 2 || auth.token != "" {
 		t.Fatal("verification reused or retained a task token")
-	}
-	if err := api.VerifyExecutionProfile(context.Background(), "team/project", "privileged"); err == nil {
-		t.Fatal("accepted an unknown profile")
 	}
 }
 func TestRepositoryTokenRejectsBroaderGrant(t *testing.T) {
@@ -127,7 +124,7 @@ func TestUnbackedLogicalIdentityPreparesLocalOnlyOpenShellTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("local", caller, nil); err != nil {
+	if err := store.CreateIdentity("local", caller, ""); err != nil {
 		t.Fatal(err)
 	}
 	log := filepath.Join(t.TempDir(), "openshell-calls")
@@ -156,7 +153,7 @@ esac`)
 	repo := repoFixture(t) // intentionally has no GitHub origin
 	for _, profile := range []string{"investigation", "implementation"} {
 		t.Run(profile, func(t *testing.T) {
-			task, err := (Service{Store: store}).Run(context.Background(), RunOptions{Repo: repo, Identity: "local", Profile: profile, Agent: "codex", Backend: "screen", Prompt: "inspect locally"})
+			task, err := (Service{Store: store}).Run(context.Background(), RunOptions{Repo: repo, Identity: "local", Launcher: profile, Agent: "codex", Backend: "screen", Prompt: "inspect locally"})
 			if err == nil || task.ID == "" || task.OpenShell == nil {
 				t.Fatal("local task was rejected before sandbox preparation", task, err)
 			}

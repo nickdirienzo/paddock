@@ -12,7 +12,8 @@ import (
 )
 
 const identityHelp = `Agent identities:
-  paddock identity create NAME [--profiles investigation,implementation]
+  paddock identity create NAME [--launcher NAME]
+  paddock identity configure NAME --launcher NAME
   paddock identity list [--json]
   paddock identity show NAME [--json]
   paddock identity verify NAME [--repo owner/repo] [--json]
@@ -38,7 +39,7 @@ func runIdentity(args []string, out io.Writer) error {
 	if command == "github" {
 		return runIdentityGitHub(args[1:], out)
 	}
-	allowed, ok := map[string]string{"create": "profiles", "list": "json", "show": "json", "verify": "repo json", "disable": "", "enable": ""}[command]
+	allowed, ok := map[string]string{"create": "launcher", "configure": "launcher", "list": "json", "show": "json", "verify": "repo json", "disable": "", "enable": ""}[command]
 	if !ok {
 		return fmt.Errorf("unknown identity command; use paddock identity --help")
 	}
@@ -71,15 +72,21 @@ func runIdentity(args []string, out io.Writer) error {
 		return err
 	}
 	if command == "create" {
-		profiles := []string{}
-		if flags["profiles"] != "" {
-			profiles = strings.Split(flags["profiles"], ",")
-		}
-		if err = store.CreateIdentity(pos[0], caller, profiles); err != nil {
+		if err = store.CreateIdentity(pos[0], caller, flags["launcher"]); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintln(out, "Created identity", pos[0])
 		return nil
+	}
+	if command == "configure" {
+		if _, ok := flags["launcher"]; !ok {
+			return fmt.Errorf("identity configure requires --launcher NAME")
+		}
+		if err = store.SetIdentityLauncher(pos[0], caller, flags["launcher"]); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, "Configured identity", pos[0])
+		return err
 	}
 	state, err := store.GitHubState()
 	if err != nil {
@@ -103,7 +110,7 @@ func runIdentity(args []string, out io.Writer) error {
 		if flags["json"] != "" {
 			return emit(out, identity)
 		}
-		_, _ = fmt.Fprintf(out, "Identity: %s\nOwner: %s\nProfiles: %s\nDisabled: %t\nGitHub mode: %s\nGitHub actor: %s\n", pos[0], identity.Owner, strings.Join(identity.Profiles, ","), identity.Disabled, identity.Mode, identity.Login)
+		_, _ = fmt.Fprintf(out, "Identity: %s\nOwner: %s\nLauncher: %s\nDisabled: %t\nGitHub mode: %s\nGitHub actor: %s\n", pos[0], identity.Owner, identity.Launcher, identity.Disabled, identity.Mode, identity.Login)
 		if identity.App != nil {
 			_, _ = fmt.Fprintf(out, "App ID: %d\nInstallation ID: %d\nKey file: %s\n", identity.App.AppID, identity.App.InstallationID, identity.App.KeyFile)
 		}
@@ -120,25 +127,26 @@ func runIdentity(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
-		verifiedProfiles := []string{}
+		verifiedLauncher := ""
 		if flags["repo"] != "" {
 			api := paddock.NewGitHubAPI(verified)
 			if e = api.VerifyRepository(context.Background(), flags["repo"]); e != nil {
 				return e
 			}
-			profiles := identity.Profiles
-			if len(profiles) == 0 {
-				profiles = []string{"investigation", "implementation"}
+			config, e := store.LauncherConfig(identity.Launcher)
+			if e != nil {
+				return e
 			}
-			for _, profile := range profiles {
-				if e = api.VerifyExecutionProfile(context.Background(), flags["repo"], profile); e != nil {
-					return fmt.Errorf("verify %s profile: %w", profile, e)
-				}
-				verifiedProfiles = append(verifiedProfiles, profile)
+			if e = api.VerifyExecutionAccess(context.Background(), flags["repo"], config.ReadOnly); e != nil {
+				return e
+			}
+			verifiedLauncher = identity.Launcher
+			if verifiedLauncher == "" {
+				verifiedLauncher = "default"
 			}
 		}
 		if flags["json"] != "" {
-			return emit(out, map[string]any{"name": pos[0], "github_actor": verified.Login, "bot_user_id": botID, "app_id": verified.App.AppID, "installation_id": verified.App.InstallationID, "repository": flags["repo"], "verified_profiles": verifiedProfiles, "verified": true})
+			return emit(out, map[string]any{"name": pos[0], "github_actor": verified.Login, "bot_user_id": botID, "app_id": verified.App.AppID, "installation_id": verified.App.InstallationID, "repository": flags["repo"], "verified_launcher": verifiedLauncher, "verified": true})
 		}
 		_, _ = fmt.Fprintln(out, "Verified", pos[0], "as", verified.Login)
 		return nil

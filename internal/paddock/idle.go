@@ -49,6 +49,9 @@ func checkClaudeIdleRuntime(ctx context.Context, task Task) error {
 	if task.IdleTTL == "" || task.Session.Agent != "claude" {
 		return nil
 	}
+	if task.RuntimeName() != "openshell" {
+		return fmt.Errorf("idle-ttl requires the OpenShell runtime")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	probe := `import pathlib,subprocess

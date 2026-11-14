@@ -6,29 +6,26 @@ import (
 	"testing"
 )
 
-func TestIdentityOwnerProfilesAndImmutableProvenance(t *testing.T) {
+func TestIdentityOwnerAndImmutableProvenance(t *testing.T) {
 	store, err := OpenStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.CreateIdentity("mozzie", "100:engineer", []string{"investigation"}); err != nil {
+	if err := store.CreateIdentity("mozzie", "100:engineer", "investigation"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("mozzie", "100:engineer", nil); err == nil {
+	if err := store.CreateIdentity("mozzie", "100:engineer", ""); err == nil {
 		t.Fatal("duplicate identity accepted")
 	}
 	state, err := store.GitHubState()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.IdentityForCaller("mozzie", "implementation", "100:engineer"); err == nil {
-		t.Fatal("profile escalation accepted")
-	}
-	if _, err := state.IdentityForCaller("mozzie", "investigation", "101:other"); err == nil {
+	if _, err := state.IdentityForCaller("mozzie", "101:other"); err == nil {
 		t.Fatal("other caller accepted")
 	}
-	if _, err := state.IdentityForCaller("mozzie", "investigation", "100:engineer"); err != nil {
+	if _, err := state.IdentityForCaller("mozzie", "100:engineer"); err != nil {
 		t.Fatal(err)
 	}
 	task := Task{ID: newID(), Status: "preparing", Provenance: TaskProvenance{Caller: "100:engineer", Identity: "mozzie", Profile: "investigation", Context: map[string]string{"case": "123"}}}
@@ -57,10 +54,10 @@ func TestGitHubRouteRequiresIdentityOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("mine", caller, nil); err != nil {
+	if err := store.CreateIdentity("mine", caller, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("other", "999999:other", nil); err != nil {
+	if err := store.CreateIdentity("other", "999999:other", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RouteGitHubIdentity("team/project", "other"); err == nil {
@@ -90,11 +87,11 @@ func TestIntegrationDispatchIsolationAndExternalReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateIdentity("service", caller, []string{"investigation"}); err != nil {
+	if err := store.CreateIdentity("service", caller, "investigation"); err != nil {
 		t.Fatal(err)
 	}
 	s := Service{Store: store}
-	if _, err := s.Run(context.Background(), RunOptions{Runtime: "host", Identity: "service", Profile: "investigation", Prompt: "review"}); err == nil || !strings.Contains(err.Error(), "OpenShell") {
+	if _, err := s.Run(context.Background(), RunOptions{Runtime: "host", Identity: "service", Launcher: "investigation", Prompt: "review"}); err == nil || !strings.Contains(err.Error(), "openshell") {
 		t.Fatalf("host identity execution was accepted: %v", err)
 	}
 	task := Task{ID: newID(), Runtime: "openshell", Prompt: "review", Session: Session{Agent: "codex"}, Provenance: TaskProvenance{Caller: caller, Requester: "user-1", RequesterSource: "service-api", ExternalID: "event-1", Profile: "implementation", Context: map[string]string{"case": "123"}}}
@@ -127,8 +124,8 @@ func TestIntegrationDispatchIsolationAndExternalReconciliation(t *testing.T) {
 	if err := store.Insert(legacy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Run(context.Background(), RunOptions{Prompt: "review", Requester: "user-1", RequesterSource: "service-api", ExternalID: "legacy-host", Context: map[string]string{"case": "123"}}); err == nil || !strings.Contains(err.Error(), "OpenShell") {
-		t.Fatalf("reused a legacy host execution: %v", err)
+	if got, err := s.Run(context.Background(), RunOptions{Prompt: "review", Requester: "user-1", RequesterSource: "service-api", ExternalID: "legacy-host", Context: map[string]string{"case": "123"}}); err != nil || got.ID != legacy.ID {
+		t.Fatalf("host execution retry: %+v %v", got, err)
 	}
 }
 
@@ -185,12 +182,12 @@ func TestDelegationRejectsAnotherCallersParent(t *testing.T) {
 }
 
 func TestInvestigationGitHubProfileIsReadOnly(t *testing.T) {
-	for _, capability := range profileCapabilities("investigation") {
+	for _, capability := range executionCapabilities(true, true) {
 		if capability == "github.write" || capability == "repository.write" {
 			t.Fatal("investigation advertises write capability")
 		}
 	}
-	profile := githubProfileForExecution("owner/repo", "task", "investigation")
+	profile := githubProfileForExecution("owner/repo", "task", true)
 	endpoints := profile["endpoints"].([]any)
 	api := endpoints[0].(map[string]any)
 	for _, item := range api["rules"].([]any) {

@@ -19,12 +19,12 @@ import (
 )
 
 const newHelp = `Usage: paddock new [--repo name-or-path] [--agent codex|claude]
-                   [--runtime openshell] [--base ref] [--terminal auto|rex|screen]
-                   [--client Rex-client-id]
+                   [--runtime openshell|host] [--base ref] [--terminal auto|rex|screen]
+                   [--identity name] [--launcher name] [--codex-tui default|scrollback|fullscreen] [--client Rex-client-id]
 
 Choose a repository and agent, then write a multiline task description.
 Use Tab / Shift-Tab to move between fields, Enter for a new line in the
-description, and Escape or Ctrl-C to cancel. Agent execution uses OpenShell.
+description, and Escape or Ctrl-C to cancel. OpenShell is the default; --runtime host runs locally.
 Install a floating Rex launcher with: paddock rex setup
 `
 
@@ -103,17 +103,6 @@ func validateNewPrompt(prompt string) error {
 	return nil
 }
 
-func newTaskRuntime(home, requested string) (string, error) {
-	if requested != "" {
-		if requested != "openshell" {
-			return "", fmt.Errorf("agent execution requires OpenShell; host runtime is unavailable")
-		}
-		return requested, nil
-	}
-	// Read the preference without creating registry files just to show a form.
-	return (&paddock.Store{Home: home}).DefaultRuntime()
-}
-
 func launcherKeyMap() *huh.KeyMap {
 	keys := huh.NewDefaultKeyMap()
 	keys.Quit = key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel"))
@@ -153,7 +142,7 @@ func newTaskForm(draft *newTaskDraft, choices []repositoryChoice, home, base str
 		).Title("New Paddock Task").WithHideFunc(func() bool { return draft.Repo != "" }),
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("Agent").Options(
-				huh.NewOption("Codex", "codex"), huh.NewOption("Claude Code", "claude"),
+				huh.NewOption("Configured agent", ""), huh.NewOption("Codex", "codex"), huh.NewOption("Claude Code", "claude"),
 			).Value(&draft.Agent),
 		).Title("Agent").Description("Use ↑/↓ to choose and Tab to move between fields. Escape cancels."),
 		huh.NewGroup(
@@ -168,8 +157,14 @@ func newTaskForm(draft *newTaskDraft, choices []repositoryChoice, home, base str
 // Reuse run's validation and launch path, with JSON keeping creation separate
 // from displaying the session. An attach failure must never create a second task.
 func newTaskRunArgs(draft newTaskDraft, flags map[string]string) []string {
-	args := []string{"run", "--json", "--repo", draft.Repo, "--agent", draft.Agent, "--runtime", draft.Runtime}
-	for _, name := range []string{"base", "terminal"} {
+	args := []string{"run", "--json", "--repo", draft.Repo}
+	if draft.Agent != "" {
+		args = append(args, "--agent", draft.Agent)
+	}
+	if draft.Runtime != "" {
+		args = append(args, "--runtime", draft.Runtime)
+	}
+	for _, name := range []string{"base", "terminal", "identity", "launcher", "codex-tui"} {
 		if value := flags[name]; value != "" {
 			args = append(args, "--"+name, value)
 		}
@@ -178,7 +173,7 @@ func newTaskRunArgs(draft newTaskDraft, flags map[string]string) []string {
 }
 
 func runNew(args []string, out io.Writer) error {
-	flags, pos, err := parse(args, "repo agent runtime base terminal client")
+	flags, pos, err := parse(args, "repo agent runtime base terminal client identity launcher codex-tui")
 	if err != nil {
 		return err
 	}
@@ -189,7 +184,7 @@ func runNew(args []string, out io.Writer) error {
 	if len(pos) != 0 {
 		return fmt.Errorf("new takes no positional arguments; use paddock new --help")
 	}
-	for name, allowed := range map[string]string{"agent": "codex claude", "runtime": "openshell", "terminal": "auto rex screen"} {
+	for name, allowed := range map[string]string{"agent": "codex claude", "runtime": "openshell host", "terminal": "auto rex screen"} {
 		if value := flags[name]; value != "" && !strings.Contains(" "+allowed+" ", " "+value+" ") {
 			return fmt.Errorf("invalid --%s %q (use %s)", name, value, allowed)
 		}
@@ -209,14 +204,7 @@ func runNew(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	runtime, err := newTaskRuntime(home, flags["runtime"])
-	if err != nil {
-		return err
-	}
-	draft := newTaskDraft{Repo: selected, Agent: flags["agent"], Runtime: runtime, Start: true}
-	if draft.Agent == "" {
-		draft.Agent = "codex"
-	}
+	draft := newTaskDraft{Repo: selected, Agent: flags["agent"], Runtime: flags["runtime"], Start: true}
 	if err = newTaskForm(&draft, choices, home, flags["base"]).Run(); errors.Is(err, huh.ErrUserAborted) {
 		return nil
 	} else if err != nil {

@@ -4,7 +4,11 @@ Paddock runs local coding tasks in Git worktrees and persistent terminals. Use t
 installed CLI for task state, delegation, and watched-PR coordination. Keep the user's
 requested scope and the agent's existing permission settings.
 
-New tasks run in OpenShell. Existing host tasks can be inspected but cannot resume.
+New tasks use the identity's named launcher configuration, or the default launcher
+(OpenShell when no runtime preference is set). Explicit run flags override launcher
+defaults. Host tasks and `paddock tp` use native local agents and support resume.
+Use `paddock launcher --help` and `paddock identity configure NAME --launcher NAME`
+to inspect or change these mappings. Execution settings are pinned in each task.
 See `paddock runtime --help`.
 Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
 and watches, and its CLI is not exposed in the sandbox. The host poller discovers
@@ -137,7 +141,7 @@ paddock github stop                 # stop service; retain all watches
 ```
 
 Do not spawn a polling loop per task. Exiting an agent leaves the shared poller running;
-comments for resumable Codex and Claude OpenShell tasks wake the same saved conversation and worktree.
+comments for resumable Codex and Claude host and OpenShell tasks wake the same saved conversation and worktree.
 Tasks without a saved conversation ID remain offline, with comments pending and no
 eyes reaction; use `paddock resume TASK_ID` to recover the identity when possible. `github unwatch PR_URL` removes a registration. After reboot, run `github start`
 or register a watch again; there is no automatic login service yet.
@@ -170,7 +174,7 @@ its own reply command and eyes receipt. Later thread replies and standalone comm
 arrive individually. GitHub does not support eyes reactions on review summaries.
 It does not create child tasks based on comment wording. Only explicitly watched PRs
 and authorized authors trigger delivery. Incoming PR message delivery supports
-Codex and Claude tasks in OpenShell.
+Codex and Claude tasks on the host and in OpenShell.
 Claude inbox delivery accepts Claude Code 2.1.286 and 2.1.325. New images pin 2.1.325.
 Claude applies its own peer-message admission and tool approvals; held or uncertain
 deliveries require inspection, never terminal typing or blind retries.
@@ -183,7 +187,7 @@ not authorize additional publication or infrastructure changes.
 
 Use `paddock run --external-id`, `paddock message --external-id`, and
 `paddock artifacts --json` for deterministic dispatch, receipts, and inspection.
-Model-backed planning is unavailable until its LLM runs in OpenShell.
+Model-backed planning is currently unavailable; use run and message for deterministic dispatch.
 
 ## Workspace retention
 

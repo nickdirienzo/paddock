@@ -10,36 +10,38 @@ import (
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
 type Task struct {
-	Provenance         TaskProvenance `json:"provenance,omitzero"`
-	Role               string         `json:"role,omitempty"`
-	Runtime            string         `json:"runtime,omitempty"` // empty on legacy host tasks
-	OpenShell          *OpenShellTask `json:"openshell,omitempty"`
-	ID                 string         `json:"id"`
-	SignalID           string         `json:"signal_id,omitempty"`
-	RelatedTaskID      string         `json:"related_task_id,omitempty"`
-	ParentID           string         `json:"parent_id,omitempty"`
-	Prompt             string         `json:"prompt"`
-	Repo               string         `json:"repo"`
-	CommonDir          string         `json:"common_dir"`
-	Base               string         `json:"base"`
-	BaseCommit         string         `json:"base_commit"`
-	Branch             string         `json:"branch"`
-	Worktree           string         `json:"worktree"`
-	Status             string         `json:"status"`
-	Error              string         `json:"error,omitempty"`
-	CreatedAt          string         `json:"created_at"`
-	UpdatedAt          string         `json:"updated_at"`
-	LastActivityAt     string         `json:"last_activity_at,omitempty"`
-	IdleTTL            string         `json:"idle_ttl,omitempty"`
-	Idle               *IdleState     `json:"idle,omitempty"`
-	WorkspaceCommit    string         `json:"workspace_commit,omitempty"`
-	WorkspaceRemovedAt string         `json:"workspace_removed_at,omitempty"`
-	Session            Session        `json:"session"`
+	Launcher           *LauncherConfig `json:"launcher,omitempty"`
+	Provenance         TaskProvenance  `json:"provenance,omitzero"`
+	Role               string          `json:"role,omitempty"`
+	Runtime            string          `json:"runtime,omitempty"` // empty on legacy host tasks
+	OpenShell          *OpenShellTask  `json:"openshell,omitempty"`
+	ID                 string          `json:"id"`
+	SignalID           string          `json:"signal_id,omitempty"`
+	RelatedTaskID      string          `json:"related_task_id,omitempty"`
+	ParentID           string          `json:"parent_id,omitempty"`
+	Prompt             string          `json:"prompt"`
+	Repo               string          `json:"repo"`
+	CommonDir          string          `json:"common_dir"`
+	Base               string          `json:"base"`
+	BaseCommit         string          `json:"base_commit"`
+	Branch             string          `json:"branch"`
+	Worktree           string          `json:"worktree"`
+	Status             string          `json:"status"`
+	Error              string          `json:"error,omitempty"`
+	CreatedAt          string          `json:"created_at"`
+	UpdatedAt          string          `json:"updated_at"`
+	LastActivityAt     string          `json:"last_activity_at,omitempty"`
+	IdleTTL            string          `json:"idle_ttl,omitempty"`
+	Idle               *IdleState      `json:"idle,omitempty"`
+	WorkspaceCommit    string          `json:"workspace_commit,omitempty"`
+	WorkspaceRemovedAt string          `json:"workspace_removed_at,omitempty"`
+	Session            Session         `json:"session"`
 }
 
 // TaskProvenance is fixed when the trusted host creates a task. Requester and
 // context are assertions from the caller, never authentication evidence.
 type TaskProvenance struct {
+	Launcher        string            `json:"launcher,omitempty"`
 	Caller          string            `json:"caller,omitempty"`
 	Requester       string            `json:"requester,omitempty"`
 	RequesterSource string            `json:"requester_source,omitempty"`
@@ -59,6 +61,7 @@ type Session struct {
 	LastTurn       *AgentTurn `json:"last_turn,omitempty"` // last native turn observed before this session stopped
 	AgentHome      string     `json:"agent_home,omitempty"`
 	Agent          string     `json:"agent"`
+	CodexTUI       string     `json:"codex_tui,omitempty"`
 	TrustProject   bool       `json:"trust_project,omitempty"`
 	AgentPath      string     `json:"agent_path"`
 	Backend        string     `json:"backend"`
