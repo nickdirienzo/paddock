@@ -1,0 +1,274 @@
+#!/usr/bin/python3
+"""Own idle expiry for integration-only Claude TUIs, without terminal typing.
+
+Native Stop metadata, successful hook completion and the native turn boundary
+confirm completion. Only Paddock integrations may submit work to TTL sessions. The launcher
+serializes delivery admission and expiry; no saved transcript alone permits exit.
+"""
+import contextlib
+import hashlib
+import json
+import os
+import pathlib
+import shlex
+import socket
+import socketserver
+import subprocess
+import sys
+import threading
+import uuid
+
+POLICY = {
+    'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS': '1',
+    'CLAUDE_CODE_DISABLE_AGENT_VIEW': '1',
+    'CLAUDE_CODE_DISABLE_CRON': '1',
+    'CLAUDE_CODE_DISABLE_MCP_TASKS': '1',
+    'CLAUDE_CODE_GOAL_CHECKIN_MINUTES': '0',
+}
+
+
+def save(path, value):
+    path = pathlib.Path(path)
+    temporary = path.with_name(path.name + '.tmp')
+    with open(temporary, 'w') as stream:
+        os.chmod(temporary, 0o600)
+        json.dump(value, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def client(root, request):
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(10)
+        connection.connect(str(pathlib.Path(root) / 'idle-control.sock'))
+        connection.sendall((json.dumps(request) + '\n').encode())
+        with connection.makefile() as stream:
+            return json.loads(stream.readline(65537))
+
+
+def settings(generation):
+    command = shlex.join([sys.executable, str(pathlib.Path(__file__).resolve()), 'hook', str(generation)])
+    hooks = {event: [{'hooks': [{'type': 'command', 'command': command, 'timeout': 5}]}]
+             for event in ('UserPromptSubmit', 'PreToolUse', 'PermissionRequest',
+                           'SubagentStart', 'Stop', 'StopFailure', 'PreCompact', 'ConfigChange')}
+    hooks['Notification'] = [{'matcher': 'permission_prompt|elicitation_dialog|elicitation_url_dialog',
+                              'hooks': [{'type': 'command', 'command': command, 'timeout': 5}]}]
+    return {'hooks': hooks, 'idleCompaction': False, 'autoContinueAtUsageLimit': False,
+            'modelProposedGoals': 'disabled'}
+
+
+def snapshot(home, conversation, cwd):
+    paths = list(pathlib.Path(home).glob('projects/*/' + conversation + '.jsonl'))
+    if len(paths) != 1 or paths[0].is_symlink() or not paths[0].is_file():
+        raise ValueError('native conversation is unavailable or ambiguous')
+    turn, completed, answer, anchored, hooks_completed = '', False, False, False, False
+    request_position = prompt_position = -1
+    digest = hashlib.sha256()
+    with paths[0].open('rb') as stream:
+        for position, line in enumerate(stream):
+            if not line.endswith(b'\n'):
+                raise ValueError('native history has an incomplete append')
+            event = json.loads(line)
+            if event.get('isSidechain'):
+                continue
+            native = event.get('sessionId') or event.get('session_id')
+            if native and native != conversation:
+                raise ValueError('native conversation changed')
+            if event.get('cwd') and not anchored:
+                if os.path.realpath(event['cwd']) != os.path.realpath(cwd):
+                    raise ValueError('native workspace changed')
+                anchored = True
+            kind = event.get('type')
+            message = event.get('message', {})
+            if not isinstance(message, dict):
+                raise ValueError('unknown native message shape')
+            content = message.get('content')
+            prompt_content = (isinstance(content, str) and bool(content.strip())) or (
+                isinstance(content, list) and any(isinstance(block, dict) and
+                block.get('type') != 'tool_result' for block in content))
+            prompt = (kind == 'user' and message.get('role') == 'user' and
+                      'toolUseResult' not in event and prompt_content)
+            queued = kind == 'queue-operation' and event.get('operation') == 'enqueue'
+            duration = kind == 'system' and event.get('subtype') == 'turn_duration'
+            hook_summary = kind == 'system' and event.get('subtype') == 'stop_hook_summary'
+            if prompt or queued or kind in ('assistant', 'api-request') or duration or hook_summary:
+                digest.update(line)
+            if prompt:
+                turn, completed, answer = event.get('uuid', ''), False, False
+                hooks_completed = False
+                request_position = prompt_position = position
+            elif queued:
+                request_position, completed = position, False
+            elif kind == 'assistant':
+                completed = False
+                answer = (message.get('stop_reason') == 'end_turn' and
+                          not event.get('isApiErrorMessage') and not event.get('error'))
+            elif kind == 'api-request':
+                completed = False
+            elif hook_summary:
+                completed = False
+                hooks_completed = event.get('hookErrors') == [] and event.get('preventedContinuation') is False
+            elif duration:
+                completed = (bool(turn) and answer and hooks_completed and prompt_position == request_position and
+                             event.get('pendingBackgroundAgentCount', 0) == 0 and
+                             event.get('pendingWorkflowCount', 0) == 0)
+    if not anchored or not turn:
+        raise ValueError('no native task turn is available')
+    return {'turn_id': turn, 'completed': completed, 'fingerprint': digest.hexdigest()}
+
+
+class ClaudeIdle:
+    def __init__(self, root, generation, conversation, cwd, home, child):
+        self.root, self.generation = pathlib.Path(root), generation
+        self.conversation, self.cwd, self.home, self.child = conversation, os.path.realpath(cwd), home, child
+        self.gate = threading.RLock()
+        self.epoch = str(uuid.uuid4())
+        self.stop_safe = False
+        self.confirmed = None
+        self.draining = None
+        self.last_hook = ''
+        self.stop_observation = None
+
+    def activity(self):
+        self.epoch = str(uuid.uuid4())
+        self.confirmed = None
+        self.stop_safe = False
+
+    def hook(self, event):
+        if event.get('session_id') != self.conversation or os.path.realpath(event.get('cwd', '')) != self.cwd:
+            raise ValueError('native hook identity changed')
+        self.last_hook = event.get('hook_event_name', '') + ':' + event.get('notification_type', '')
+        if event.get('hook_event_name') == 'Notification' and event.get('notification_type') == 'idle_prompt':
+            # Resumed inbox-only turns do not reliably emit this notification.
+            # It is neither required nor sufficient to authorize expiry.
+            return
+        self.activity()
+        if event.get('hook_event_name') == 'Stop':
+            self.stop_observation = {
+                'background_count': len(event['background_tasks']) if isinstance(event.get('background_tasks'), list) else -1,
+                'cron_count': len(event['session_crons']) if isinstance(event.get('session_crons'), list) else -1,
+                'subagent': bool(event.get('agent_id'))}
+        if (event.get('hook_event_name') == 'Stop' and not event.get('agent_id') and
+                event.get('background_tasks') == [] and event.get('session_crons') == []):
+            self.stop_safe = True
+
+    def inspect(self, request):
+        with self.gate:
+            if request.get('generation') != self.generation:
+                raise ValueError('stale launch generation')
+            if self.draining:
+                if request.get('op') == 'delivery':
+                    return {'state': 'offline'}
+                return {'state': 'draining', **self.draining}
+            if self.child.poll() is not None:
+                raise ValueError('native owner exited')
+            operation = request.get('op')
+            if operation == 'hook':
+                self.hook(request['event'])
+                return {'state': 'ok'}
+            if request.get('thread') != self.conversation:
+                raise ValueError('native conversation changed')
+            if operation == 'delivery':
+                self.activity()
+                return {'state': 'admitted'}
+            if os.path.realpath(request.get('cwd', '')) != self.cwd:
+                raise ValueError('native workspace changed')
+            if operation not in ('status', 'expire'):
+                raise ValueError('unknown idle operation')
+            native = snapshot(self.home, self.conversation, self.cwd)
+            if self.confirmed is None and self.stop_safe and native['completed']:
+                self.confirmed = native
+            if not self.confirmed or native != self.confirmed or not native['completed']:
+                if self.confirmed is not None:
+                    self.activity()
+                raise ValueError('native turn active, blocked, or awaiting idle confirmation; last hook: ' +
+                                 self.last_hook + '; Stop: ' + json.dumps(self.stop_observation))
+            state = {'state': 'completed', 'turn_id': native['turn_id'], 'epoch': self.epoch}
+            if operation == 'status':
+                return state
+            if request.get('epoch') != self.epoch or request.get('turn_id') != native['turn_id']:
+                raise ValueError('native activity changed since checkpoint')
+            marker = {'generation': self.generation, 'thread': self.conversation,
+                      'turn_id': native['turn_id'], 'epoch': self.epoch}
+            # Close admission and persist intent before signalling our direct child.
+            # Popen serializes send_signal with wait/poll, avoiding PID reuse.
+            save(self.root / 'idle-drain.json', marker)
+            self.draining = marker
+            self.child.terminate()
+            return {'state': 'draining', **marker}
+
+    def exited(self, code):
+        with self.gate:
+            if self.draining and code in (0, 143):
+                save(self.root / 'idle-stopped.json', self.draining)
+                return 0
+            return code
+
+
+def launch(root, generation, args):
+    root = pathlib.Path(root)
+    version = subprocess.check_output([args[0], '--version'], text=True).strip()
+    if version != '2.1.325 (Claude Code)':
+        raise ValueError('Claude idle TTL requires Claude Code 2.1.325; rebuild the runtime image')
+    for name in ('idle-control.sock', 'idle-ready.json', 'idle-drain.json', 'idle-stopped.json', 'agent-exit.json'):
+        (root / name).unlink(missing_ok=True)
+    flag = '--resume' if '--resume' in args else '--session-id'
+    conversation = args[args.index(flag) + 1]
+    home = os.environ.get('CLAUDE_CONFIG_DIR', '/home/sandbox/.claude')
+    args = [args[0], '--settings', json.dumps(settings(generation)),
+            '--disallowedTools', 'Monitor'] + args[1:]
+    environment = dict(os.environ, **POLICY)
+    owner = None
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            try:
+                request = json.loads(self.rfile.readline(65537))
+                result = owner.inspect(request)
+            except ValueError as error:
+                result = {'state': 'unknown', 'error': str(error)}
+            except (OSError, KeyError, TypeError):
+                result = {'state': 'unknown', 'error': 'native idle state is unavailable or changed'}
+            self.wfile.write((json.dumps(result) + '\n').encode())
+
+    with socketserver.UnixStreamServer(str(root / 'idle-control.sock'), Handler) as server:
+        os.chmod(root / 'idle-control.sock', 0o600)
+        child = subprocess.Popen(args, env=environment)
+        owner = ClaudeIdle(root, generation, conversation, os.getcwd(), home, child)
+        save(root / 'claude-process.json', {'pid': child.pid, 'conversation': conversation,
+                                           'generation': generation, 'idle_protocol': 1})
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        save(root / 'idle-ready.json', {'generation': generation})
+        try:
+            while True:
+                try:
+                    code = child.wait()
+                    break
+                except KeyboardInterrupt:
+                    continue  # The native foreground group receives the same interrupt.
+            code = owner.exited(code)
+            save(root / 'agent-exit.json', {'generation': generation, 'code': code})
+            return code
+        finally:
+            server.shutdown()
+            worker.join()
+            (root / 'idle-control.sock').unlink(missing_ok=True)
+
+
+if __name__ == '__main__':
+    root = os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox')
+    if sys.argv[1] == 'launch':
+        code = launch(root, int(sys.argv[2]), sys.argv[3:])
+        sys.exit(code if code >= 0 else 128 - code)
+    elif sys.argv[1] == 'hook':
+        # Hook failures never alter native approvals. Missing confirmation retains
+        # the session; host errors never become instructions to the model.
+        with contextlib.suppress(Exception):
+            client(root, {'op': 'hook', 'generation': int(sys.argv[2]), 'event': json.load(sys.stdin)})

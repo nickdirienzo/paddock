@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pathlib
+import runpy
 import subprocess
 import sys
 import time
@@ -70,10 +71,14 @@ agent_args = sys.argv[2:]
 claude = pathlib.Path(sys.argv[2]).name == 'claude'
 if claude:
     version = subprocess.check_output([sys.argv[2], '--version'], text=True).strip()
-    if version != '2.1.286 (Claude Code)':
-        sys.exit('Claude inbox delivery requires qualified Claude Code 2.1.286.')
+    if version not in ('2.1.286 (Claude Code)', '2.1.325 (Claude Code)'):
+        sys.exit('Claude inbox delivery requires qualified Claude Code 2.1.286 or 2.1.325.')
     inbox = pathlib.Path(os.environ.get('CLAUDE_CONFIG_DIR', '/home/sandbox/.claude')) / 'paddock-inbox.sock'
     agent_args = [sys.argv[2], '--messaging-socket-path', str(inbox)] + sys.argv[3:]
+    if os.environ.get('PADDOCK_IDLE_TTL'):
+        helper = runpy.run_path('/usr/local/bin/paddock-claude-idle')
+        code = helper['launch'](control, int(sys.argv[1]), agent_args)
+        sys.exit(code if code >= 0 else 128 - code)
 # The child owns native approvals and turn completion; never infer idle from PTY output.
 child = subprocess.Popen(agent_args)
 if claude:

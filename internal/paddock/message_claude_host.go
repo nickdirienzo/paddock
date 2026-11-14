@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-const claudeInboxVersion = "2.1.286 (Claude Code)"
+const claudeInboxVersion = "2.1.325 (Claude Code)"
+
+func qualifiedClaudeInboxVersion(version string) bool {
+	return version == "2.1.286 (Claude Code)" || version == claudeInboxVersion
+}
 
 type claudeInbox struct {
 	PID          int    `json:"pid"`
@@ -35,8 +39,8 @@ func prepareHostClaudeInbox(t Task, c *exec.Cmd) (claudeInbox, func(), error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	version, err := agentCommandContext(ctx, t, "--version").Output()
-	if err != nil || strings.TrimSpace(string(version)) != claudeInboxVersion {
-		return inbox, noop, fmt.Errorf("Claude inbox delivery requires qualified Claude Code 2.1.286 (version check: %q, %v)", strings.TrimSpace(string(version)), err)
+	if err != nil || !qualifiedClaudeInboxVersion(strings.TrimSpace(string(version))) {
+		return inbox, noop, fmt.Errorf("Claude inbox delivery requires qualified Claude Code 2.1.286 or 2.1.325 (version check: %q, %v)", strings.TrimSpace(string(version)), err)
 	}
 	dir, err := os.MkdirTemp("", "pd-")
 	if err != nil {

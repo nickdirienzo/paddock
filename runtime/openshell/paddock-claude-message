@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Deliver to the qualified Claude 2.1.286 native inbox, respecting admission.
+"""Deliver to a qualified Claude native inbox, respecting admission.
 
 Never turn a failed/uncertain write into a retry. The persisted native queue
 record is evidence of admission, not evidence of turn completion.
@@ -23,6 +23,18 @@ def deliver(root, conversation, generation, body, timeout=15, home='/home/sandbo
         if state['conversation'] != conversation or state['generation'] != generation:
             connection.close()
             return 'offline'
+        if state.get('idle_protocol') == 1:
+            # Invalidate the idle checkpoint before any native write. Expiry
+            # closes this admission path permanently for its launch generation.
+            with socket.socket(socket.AF_UNIX) as control:
+                control.settimeout(timeout)
+                control.connect(str(root / 'idle-control.sock'))
+                control.sendall((json.dumps({'op': 'delivery', 'generation': generation,
+                                             'thread': conversation}) + '\n').encode())
+                with control.makefile() as stream:
+                    if json.loads(stream.readline(65537)).get('state') != 'admitted':
+                        connection.close()
+                        return 'offline'
         connection.connect(str(pathlib.Path(home) / 'paddock-inbox.sock'))
         pid, _, uid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         if pid != state['pid'] or uid != (root / 'claude-process.json').stat().st_uid:
@@ -72,4 +84,5 @@ if __name__ == '__main__':
     body = json.load(sys.stdin)['message']
     if not isinstance(body, str) or not body.strip() or len(body.encode()) > 512000:
         sys.exit('Invalid message')
-    print(deliver(os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox'), sys.argv[1], int(sys.argv[2]), body))
+    print(deliver(os.environ.get('PADDOCK_CONTROL_DIR', '/sandbox'), sys.argv[1], int(sys.argv[2]), body,
+                  home=os.environ.get('CLAUDE_CONFIG_DIR', '/home/sandbox/.claude')))

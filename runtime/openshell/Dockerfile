@@ -4,9 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git gh ca-certi
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 ARG CODEX_VERSION=0.159.2
-ARG CLAUDE_VERSION=2.1.286
+ARG CLAUDE_VERSION=2.1.325
 RUN node /usr/local/lib/node_modules/npm/bin/npm-cli.js install -g @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_VERSION}
-COPY --chmod=755 paddock-agent paddock-codex-state paddock-claude-message paddock-idle /usr/local/bin/
+COPY --chmod=755 paddock-agent paddock-codex-state paddock-claude-message paddock-claude-idle paddock-idle /usr/local/bin/
 RUN useradd --uid 1000 --create-home --shell /bin/bash sandbox && mkdir -p /sandbox && chown sandbox:sandbox /sandbox
 COPY --chown=sandbox:sandbox codex-config.toml /home/sandbox/.codex/config.toml
 COPY --chown=sandbox:sandbox claude-config.json /home/sandbox/.claude/.claude.json

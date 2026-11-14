@@ -165,6 +165,9 @@ func sandboxExec(ctx context.Context, t Task, tty bool, args ...string) *exec.Cm
 	if t.IdleTTL != "" {
 		flags = append(flags, "--env", "PADDOCK_IDLE_TTL="+t.IdleTTL)
 	}
+	for _, value := range claudeIdleEnv(t) {
+		flags = append(flags, "--env", value)
+	}
 	if t.OpenShell.Config.CodexAccountID != "" {
 		flags = append(flags, "--env", "CODEX_ACCOUNT_ID="+t.OpenShell.Config.CodexAccountID)
 	}
