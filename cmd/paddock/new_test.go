@@ -96,8 +96,48 @@ func TestNewFormShowsAndSelectsAgents(t *testing.T) {
 	}
 }
 
+func TestNewFormShowsAndSelectsRuntimes(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial, want string
+		moves               int
+	}{
+		{"configured", "", "", 0},
+		{"openshell", "", "openshell", 1},
+		{"host", "", "host", 2},
+		{"explicit host", "host", "host", 0},
+		{"override explicit openshell", "openshell", "host", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := newTaskDraft{Repo: "/project", Agent: "codex", Runtime: tc.initial, Start: true}
+			form := newTaskForm(&draft, []repositoryChoice{{"Project", "/project"}}, t.TempDir(), "")
+			form.Init()
+			form.NextGroup()
+			form.NextGroup()
+			form.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+			for _, label := range []string{"Configured runtime", "OpenShell", "Host (local)"} {
+				if !strings.Contains(form.View(), label) {
+					t.Fatalf("option %q is hidden: %s", label, form.View())
+				}
+			}
+			for i := 0; i < tc.moves; i++ {
+				form.Update(tea.KeyMsg{Type: tea.KeyDown})
+			}
+			if draft.Runtime != tc.want || draft.Agent != "codex" {
+				t.Fatalf("selection did not reach the draft: %+v", draft)
+			}
+			flags, _, err := parse(newTaskRunArgs(draft, nil)[1:], "json repo agent runtime")
+			if err != nil || flags["runtime"] != tc.want {
+				t.Fatal("selected runtime was not sent to run", flags, err)
+			}
+			if _, present := flags["runtime"]; tc.want == "" && present {
+				t.Fatal("configured runtime should leave runtime resolution to run")
+			}
+		})
+	}
+}
+
 func TestEscapeCancelsEveryLauncherPage(t *testing.T) {
-	for _, page := range []string{"repository", "custom path", "agent", "prompt", "submit", "error notice"} {
+	for _, page := range []string{"repository", "custom path", "agent", "runtime", "prompt", "submit", "error notice"} {
 		t.Run(page, func(t *testing.T) {
 			draft := newTaskDraft{Repo: "/project", Agent: "codex", Runtime: "openshell", Start: true}
 			if page == "custom path" {
@@ -106,6 +146,9 @@ func TestEscapeCancelsEveryLauncherPage(t *testing.T) {
 			form := newTaskForm(&draft, []repositoryChoice{{"Project", "/project"}, {"Other repository…", ""}}, t.TempDir(), "")
 			form.Init()
 			if page != "repository" {
+				form.NextGroup()
+			}
+			if page == "runtime" || page == "prompt" || page == "submit" {
 				form.NextGroup()
 			}
 			if page == "prompt" || page == "submit" {

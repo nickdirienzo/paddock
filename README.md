@@ -109,10 +109,11 @@ to inspect agent work. `paddock output TASK_ID --json` returns public agent
 messages and finished turns with a cursor for polling.
 `paddock tp` opens or resumes a persistent Team Principal conversation across projects.
 
-For an interactive task form, run `paddock new`. Choose a repository and agent,
+For an interactive task form, run `paddock new`. Choose a repository, agent, and runtime,
 write a multiline prompt, and select **Start task**. Registered repository names
 appear in the picker alongside the current project; **Other repository…** accepts
-a path or name. Tasks run in OpenShell.
+a path or name. Choose **Configured runtime** to use the launcher or runtime default,
+or select **OpenShell** or **Host (local)** for this task.
 
 To open that form directly from Rex, install the launcher once:
 

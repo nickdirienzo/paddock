@@ -22,7 +22,7 @@ const newHelp = `Usage: paddock new [--repo name-or-path] [--agent codex|claude]
                    [--runtime openshell|host] [--base ref] [--terminal auto|rex|screen]
                    [--identity name] [--launcher name] [--codex-tui default|scrollback|fullscreen] [--client Rex-client-id]
 
-Choose a repository and agent, then write a multiline task description.
+Choose a repository, agent, and runtime, then write a multiline task description.
 Use Tab / Shift-Tab to move between fields, Enter for a new line in the
 description, and Escape or Ctrl-C to cancel. OpenShell is the default; --runtime host runs locally.
 Install a floating Rex launcher with: paddock rex setup
@@ -145,6 +145,11 @@ func newTaskForm(draft *newTaskDraft, choices []repositoryChoice, home, base str
 				huh.NewOption("Configured agent", ""), huh.NewOption("Codex", "codex"), huh.NewOption("Claude Code", "claude"),
 			).Value(&draft.Agent),
 		).Title("Agent").Description("Use ↑/↓ to choose and Tab to move between fields. Escape cancels."),
+		huh.NewGroup(
+			huh.NewSelect[string]().Title("Runtime").Options(
+				huh.NewOption("Configured runtime", ""), huh.NewOption("OpenShell", "openshell"), huh.NewOption("Host (local)", "host"),
+			).Value(&draft.Runtime),
+		).Title("Runtime").Description("Use ↑/↓ to choose and Tab to continue. Escape cancels."),
 		huh.NewGroup(
 			huh.NewText().Title("What should the agent do?").Placeholder("Describe the task…").
 				Lines(8).CharLimit(maxPromptBytes).ExternalEditor(false).ShowLineNumbers(false).
