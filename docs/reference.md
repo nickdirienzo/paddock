@@ -106,6 +106,14 @@ Escape or Ctrl-C creates no task. Launch errors remain visible until
 dismissed. If session selection fails after creation, the launcher shows the
 existing task's attach command; it does not launch again.
 
+For Codex tasks, prefix the prompt with `/goal <objective>` to create an active
+native Codex goal. This also works with `paddock run` and multiline prompts. The
+launcher opens the goal's saved conversation, and resuming the task preserves its
+current goal state without creating or restarting the goal. Ordinary prompts keep
+their usual behavior. `/goal` requires Codex with Goals enabled; an empty goal or a
+Claude selection is rejected. Use `/goal pause`, `/goal resume`, and `/goal clear`
+inside an existing Codex conversation to manage its goal.
+
 `new` accepts `--repo`, `--agent`, `--runtime`, `--base`, `--terminal`, and
 `--client`, `--identity`, `--launcher`, and `--codex-tui`. `--runtime` accepts
 `openshell` or `host` and preselects that runtime in the form. The Rex action explicitly uses Rex; a direct `paddock new` uses the same

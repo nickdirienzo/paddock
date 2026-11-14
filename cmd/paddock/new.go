@@ -24,7 +24,8 @@ const newHelp = `Usage: paddock new [--repo name-or-path] [--agent codex|claude]
 
 Choose a repository, agent, and runtime, then write a multiline task description.
 Use Tab / Shift-Tab to move between fields, Enter for a new line in the
-description, and Escape or Ctrl-C to cancel. OpenShell is the default; --runtime host runs locally.
+description, and Escape or Ctrl-C to cancel. Start a Codex prompt with /goal to create a native goal.
+OpenShell is the default; --runtime host runs locally.
 Install a floating Rex launcher with: paddock rex setup
 `
 
@@ -155,7 +156,7 @@ func newTaskForm(draft *newTaskDraft, choices []repositoryChoice, home, base str
 				Lines(8).CharLimit(maxPromptBytes).ExternalEditor(false).ShowLineNumbers(false).
 				Value(&draft.Prompt).Validate(validateNewPrompt),
 			huh.NewConfirm().Title("Ready?").Affirmative("Start task").Negative("Cancel").Value(&draft.Start),
-		).Title("New Paddock Task").Description("Enter adds a line. Tab moves to Start task. Escape cancels."),
+		).Title("New Paddock Task").Description("Start with /goal for a Codex goal. Enter adds a line. Tab continues. Escape cancels."),
 	).WithKeyMap(launcherKeyMap())
 }
 

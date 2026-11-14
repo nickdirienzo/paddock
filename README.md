@@ -115,6 +115,10 @@ appear in the picker alongside the current project; **Other repository…** acce
 a path or name. Choose **Configured runtime** to use the launcher or runtime default,
 or select **OpenShell** or **Host (local)** for this task.
 
+With Codex selected, start the prompt with `/goal`, for example
+`/goal Fix the failing tests and verify the full suite passes`, to launch a native
+Codex goal. The goal stays attached to the task's conversation across resumes.
+
 To open that form directly from Rex, install the launcher once:
 
 ```sh
