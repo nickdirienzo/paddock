@@ -209,7 +209,7 @@ func TestIdleActivityAndUnknownRestartTheCountdown(t *testing.T) {
 }
 
 func TestIdlePendingWorkAndDeliverySerialize(t *testing.T) {
-	for _, pending := range []string{"operation lock", "pending receipt", "uncertain receipt", "claimed receipt", "access"} {
+	for _, pending := range []string{"operation lock", "pending receipt", "uncertain receipt", "claimed receipt", "signal", "GitHub event", "GitHub reply"} {
 		t.Run(pending, func(t *testing.T) {
 			s, task, clock := idleFixture(t)
 			native, expired := idleRuntimeState{State: "completed", Epoch: "epoch", TurnID: "turn"}, 0
@@ -224,13 +224,24 @@ func TestIdlePendingWorkAndDeliverySerialize(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer release()
-			case "access":
-				// Existing noPendingWork handles GitHub signals and access proposals too.
+			case "signal":
 				receipt := SignalRecord{Status: "uncertain", Signal: Signal{TaskID: task.ID}}
 				if err := os.MkdirAll(filepath.Join(s.Store.Home, "signals"), 0700); err != nil {
 					t.Fatal(err)
 				}
 				if err := writeJSONAtomic(filepath.Join(s.Store.Home, "signals", "fixture.json"), receipt); err != nil {
+					t.Fatal(err)
+				}
+			case "GitHub event", "GitHub reply":
+				if err := s.Store.UpdateGitHub(func(v *GitHubState) error {
+					event := GitHubEvent{ID: "fixture", TaskID: task.ID, Status: "pending"}
+					if pending == "GitHub reply" {
+						event.Status = "done"
+						v.Posts["reply"] = GitHubPost{ID: "reply", EventID: event.ID, Status: "posting"}
+					}
+					v.Events[event.ID] = event
+					return nil
+				}); err != nil {
 					t.Fatal(err)
 				}
 			default:
@@ -565,19 +576,76 @@ esac`)
 	}
 }
 
-func TestIdleUnknownLiveAccessRetainsAndClearsDeadline(t *testing.T) {
-	s, task, clock := idleFixture(t)
-	native, expired := idleRuntimeState{State: "completed", Epoch: "epoch", TurnID: "turn"}, 0
-	checks := idleTestChecks(t, &native, &expired)
-	if err := s.reconcileIdle(context.Background(), clock, checks); err != nil {
-		t.Fatal(err)
-	}
-	checks.access = func(context.Context, Task) error { return errors.New("gateway unavailable") }
-	if err := s.reconcileIdle(context.Background(), clock.Add(time.Hour), checks); err != nil {
-		t.Fatal(err)
-	}
-	saved, _ := s.Store.Get(task.ID)
-	if expired != 0 || saved.Idle.Deadline != "" || !strings.Contains(saved.Idle.Error, "live access state is unknown") {
-		t.Fatal(saved.Idle)
+func TestIdlePendingAccessDoesNotRetainCompletedProcess(t *testing.T) {
+	for _, agent := range []string{"codex", "claude"} {
+		for _, arrival := range []string{"before countdown", "during countdown", "during checkpoint"} {
+			t.Run(agent+"/"+arrival, func(t *testing.T) {
+				s, task, clock := idleFixture(t)
+				task.OpenShell = &OpenShellTask{Name: "pd-fixture", Ready: true}
+				if err := s.Store.update(task.ID, func(v *Task) error {
+					v.Session.Agent, v.OpenShell = agent, task.OpenShell
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				addProposal := func() {
+					t.Helper()
+					_, _, err := s.Store.upsertAccess(task, AccessRequest{
+						ID: "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89", TaskID: task.ID, Sandbox: task.OpenShell.Name,
+						Status: "pending", Endpoints: "telemetry.example:443 [L4]",
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				native, expired := idleRuntimeState{State: "completed", Epoch: "epoch", TurnID: "turn"}, 0
+				checks := idleTestChecks(t, &native, &expired)
+				if arrival == "before countdown" {
+					addProposal()
+				}
+				if arrival == "during checkpoint" {
+					output := checks.output
+					checks.output = func(ctx context.Context, task Task) ([]OutputEvent, error) {
+						addProposal()
+						return output(ctx, task)
+					}
+				}
+				if err := s.reconcileIdle(context.Background(), clock, checks); err != nil {
+					t.Fatal(err)
+				}
+				saved, err := s.Store.Get(task.ID)
+				if err != nil || saved.Idle == nil || saved.Idle.Phase != "idle" ||
+					saved.Idle.Deadline != clock.Add(time.Hour).Format(time.RFC3339Nano) || expired != 0 {
+					t.Fatal("countdown did not start", saved.Idle, expired, err)
+				}
+				deadline := saved.Idle.Deadline
+				if arrival == "during countdown" {
+					addProposal()
+				}
+				if err := s.reconcileIdle(context.Background(), clock.Add(30*time.Minute), checks); err != nil {
+					t.Fatal(err)
+				}
+				saved, err = s.Store.Get(task.ID)
+				if err != nil || saved.Idle.Deadline != deadline || expired != 0 {
+					t.Fatal("proposal changed the deadline", saved.Idle, expired, err)
+				}
+				// Restart with the persisted countdown and inbox intact.
+				s = Service{Store: openTestStore(t, s.Store.Home)}
+				if err := s.reconcileIdle(context.Background(), clock.Add(time.Hour), checks); err != nil {
+					t.Fatal(err)
+				}
+				saved, err = s.Store.Get(task.ID)
+				if err != nil || saved.Idle.Phase != "draining" || expired != 1 {
+					t.Fatal("pending proposal prevented expiry", saved.Idle, expired, err)
+				}
+				pending, err := s.Store.ListAccess(task.ID, "pending")
+				if err != nil || len(pending) != 1 || pending[0].Decision != "" {
+					t.Fatal("expiry changed the access inbox", pending, err)
+				}
+				if err := s.noPendingWork(task.ID); err == nil || !strings.Contains(err.Error(), "pending OpenShell access request") {
+					t.Fatal("pending proposal no longer protects workspace GC", err)
+				}
+			})
+		}
 	}
 }

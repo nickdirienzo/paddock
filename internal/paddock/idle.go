@@ -85,7 +85,6 @@ type idleChecks struct {
 	output  func(context.Context, Task) ([]OutputEvent, error)
 	finish  func(context.Context, Task) error
 	now     func() time.Time
-	access  func(context.Context, Task) error
 }
 
 func idleRuntime(ctx context.Context, t Task, operation string) (idleRuntimeState, error) {
@@ -118,7 +117,6 @@ func idleRuntime(ctx context.Context, t Task, operation string) (idleRuntimeStat
 func (s Service) ReconcileIdle(ctx context.Context) error {
 	return s.reconcileIdle(ctx, time.Now().UTC(), idleChecks{
 		runtime: idleRuntime, output: idleOutput, finish: s.finishIdle, now: time.Now,
-		access: func(ctx context.Context, t Task) error { _, err := s.SyncAccess(ctx, t); return err },
 	})
 }
 
@@ -170,13 +168,9 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 			if t.Status != "running" && t.Status != "interrupted" {
 				return nil
 			}
-			if checks.access != nil {
-				if err := checks.access(ctx, t); err != nil {
-					state.Error = "live access state is unknown: " + err.Error()
-					return s.saveIdle(t, state)
-				}
-			}
-			if err := s.noPendingWork(t.ID); err != nil {
+			// Access proposals protect workspace retention, not process lifetime.
+			// The live native fence below rejects active work and approval waits.
+			if err := s.noPendingSignals(t.ID); err != nil {
 				state.Error = err.Error()
 				return s.saveIdle(t, state)
 			}
@@ -233,13 +227,7 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 			if err = s.saveIdleOutput(t, events); err != nil {
 				return err
 			}
-			if checks.access != nil {
-				if err := checks.access(ctx, t); err != nil {
-					state.Phase, state.Error = "waiting", "live access state is unknown: "+err.Error()
-					return s.saveIdle(t, state)
-				}
-			}
-			if err = s.noPendingWork(t.ID); err != nil {
+			if err = s.noPendingSignals(t.ID); err != nil {
 				state.Phase, state.Error = "waiting", err.Error()
 				return s.saveIdle(t, state)
 			}

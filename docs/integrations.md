@@ -151,6 +151,9 @@ policy and observation fields are read-only. Polling never extends the deadline.
 
 Expiry requires confirmed native completion and live safety checks; active work,
 approval/input waits, pending delivery and unknown states retain the session.
+Pending OpenShell network proposals do not block that countdown or expiry once
+the native runtime confirms completion and idle safety. They remain available
+for operator review and protect the saved workspace from GC.
 The native conversation and task ID remain stable. After expiry,
 `status: "stopped"` and `session.last_turn` retain the completion state, and
 `output --json` continues serving stable event IDs/cursors from the saved public

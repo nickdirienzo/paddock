@@ -135,8 +135,11 @@ poller restarts. Admitted new work invalidates that epoch; active, blocked,
 pending-delivery, and unknown states clear the countdown. A new completed turn
 must establish a fresh full period. Failed and interrupted turns do not qualify.
 
-Expiry requires no unresolved access proposals, pending/uncertain message
-receipts, orchestration signals, GitHub events or replies. All loaded native
+Expiry requires no pending/uncertain message receipts, orchestration signals,
+GitHub events or replies. Pending OpenShell network proposals do not prevent a
+confirmed completed native turn from counting down or expiring. Proposals remain
+in the access inbox and continue to protect the workspace from GC; proposal
+polling failures do not determine native idleness. All loaded native
 threads must be idle, with no queued messages, outstanding native RPCs, approval
 or input requests, continuing/blocked goals, or background terminals. Incomplete
 inspection retains the process. A stopped/missing terminal or saved completed

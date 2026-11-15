@@ -265,6 +265,13 @@ func (s Service) noPendingWork(id string) error {
 	if err := s.noPendingAccess(id); err != nil {
 		return err
 	}
+	return s.noPendingSignals(id)
+}
+
+// noPendingSignals checks host work that may still need delivery or a reply.
+// Idle process expiry uses this without the access inbox: a completed native
+// turn can leave unrelated network proposals pending while its workspace stays.
+func (s Service) noPendingSignals(id string) error {
 	state, err := s.Store.GitHubState()
 	if err != nil {
 		return err
