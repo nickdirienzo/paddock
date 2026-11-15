@@ -71,6 +71,55 @@ func (t terminal) rex(ctx context.Context, args ...string) ([]byte, error) {
 	return output(ctx, t.path, append(flags, args...)...)
 }
 
+// Rex retains the session header after its last block closes. Recheck the whole
+// session, including detached blocks, before removing that empty header. A retry
+// also succeeds when an earlier cleanup already removed the session.
+func (t terminal) closeEmptySession(ctx context.Context, id string) error {
+	b, err := t.rex(ctx, "ls", "--json")
+	if err != nil {
+		return err
+	}
+	var sessions struct {
+		Sessions []struct {
+			ID string `json:"session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(b, &sessions); err != nil {
+		return err
+	}
+	if sessions.Sessions == nil {
+		return fmt.Errorf("Rex returned incomplete session listing")
+	}
+	found := false
+	for _, session := range sessions.Sessions {
+		if session.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	b, err = t.rex(ctx, "block", "ls", "-s", id, "--json")
+	if err != nil {
+		return err
+	}
+	var blocks struct {
+		Blocks []json.RawMessage `json:"blocks"`
+	}
+	if err := json.Unmarshal(b, &blocks); err != nil {
+		return err
+	}
+	if blocks.Blocks == nil {
+		return fmt.Errorf("Rex returned incomplete block listing; session retained")
+	}
+	if len(blocks.Blocks) != 0 {
+		return nil
+	}
+	_, err = t.rex(ctx, "kill", id)
+	return err
+}
+
 func SelectTerminal(ctx context.Context, backend string) (Terminal, Session, error) {
 	var reasons []string
 	if backend == "" || backend == "auto" || backend == "rex" {

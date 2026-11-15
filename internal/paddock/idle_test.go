@@ -403,6 +403,7 @@ esac`)
 			task.Session.Backend, task.Session.ID, task.Session.BlockID = "rex", "session:family", "block:owned"
 			task.Session.TerminalPath = script(t, `printf '%s\n' "$*" >> `+quote(log)+`
 case "$*" in
+ *'block ls '*) printf '%s' '{"blocks":[{"block_id":"block:sibling"}]}';;
  *'ls --json') printf '%s' '{"sessions":[{"session_id":"session:family"}]}';;
  *'process') printf '%s' '{"child":null,"last_exit":{"exit_code":0}}';;
  *'block close -s session:family block:owned') exit 0;;
@@ -496,6 +497,7 @@ v=json.load(open(p));v['status']='running'
 q=p+'.fixture';json.dump(v,open(q,'w'));os.replace(q,p)`
 	task.Session.TerminalPath = script(t, `printf '%s\n' "$*" >> `+quote(log)+`
 case "$*" in
+ *'block ls '*) printf '%s' '{"blocks":[{"block_id":"block:sibling"}]}';;
  *'ls --json') printf '%s' '{"sessions":[{"session_id":"session:family"}]}';;
  *'process') if [ -f `+quote(active)+` ]; then printf '%s' '{"child":{"pid":42}}'; else printf '%s' '{"child":null,"last_exit":{"exit_code":0}}'; fi;;
  *'block close '*) exit 0;;

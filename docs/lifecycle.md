@@ -165,7 +165,9 @@ uses `SIGTERM`, a second forceable shutdown, an expiry timeout kill, or daemon-s
 to terminate model work. After the pinned native owner actually exits, the launcher may terminate
 its disconnected TUI frontend. Paddock then confirms launcher exit, stops only the
 task's sandbox, and closes only its already-exited Rex block. Sibling tasks and
-user-added panes in the shared session remain intact.
+user-added panes in the shared session remain intact. If no blocks remain,
+including detached blocks, Paddock also removes the empty Rex session header.
+Interrupted cleanup retries this step even if the owned block is already gone.
 
 The host saves release intent and a public-output checkpoint before requesting
 drain. Accepted releases and confirmed native exit are reconciled after lost

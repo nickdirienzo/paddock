@@ -291,16 +291,18 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 func closeExitedTerminal(ctx context.Context, t Task) error {
 	term := terminalFor(t.Session)
 	session, obs := term.Inspect(ctx, t)
-	if obs.State == "missing" {
-		return nil
-	}
-	if obs.State != "exited" {
+	if obs.State != "missing" && obs.State != "exited" {
 		return fmt.Errorf("refusing to close a terminal whose process is not confirmed exited")
 	}
-	if session.Backend == "rex" {
-		// Closing only the owned block preserves any panes the user added.
-		_, err := (terminal{path: session.TerminalPath, endpoint: session.Endpoint}).rex(ctx, "block", "close", "-s", session.ID, session.BlockID)
-		return err
+	if session.Backend == "rex" && session.ID != "" {
+		rex := terminal{path: session.TerminalPath, endpoint: session.Endpoint}
+		if obs.State == "exited" {
+			// Close only the owned block before checking for sibling/user panes.
+			if _, err := rex.rex(ctx, "block", "close", "-s", session.ID, session.BlockID); err != nil {
+				return err
+			}
+		}
+		return rex.closeEmptySession(ctx, session.ID)
 	}
 	return nil // Screen removes exited sessions itself.
 }
