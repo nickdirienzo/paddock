@@ -490,3 +490,10 @@ Use `paddock run --external-id`, `paddock message --external-id`,
 integration dispatch and result retrieval. See
 [integration CLI](integrations.md). Model-backed orchestration is unavailable
 until its planner runs in OpenShell.
+
+`paddock lifecycle mark-shipped TASK_ID` records the trusted host operator's explicit
+shipment confirmation for HEAD. Checkout GC requires it, including for old records.
+`paddock lifecycle archive TASK_ID` snapshots the exact matching native JSONL into
+the private local registry; `verify-archive TASK_ID` checks identity and integrity.
+These commands do not qualify native restore or whole-sandbox deletion. See
+[the archive contract and remaining revival gap](lifecycle.md#shipment-gate-and-local-transcript-archives-review-subset).

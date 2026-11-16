@@ -10,7 +10,7 @@ import (
 )
 
 func runLifecycle(args []string, out io.Writer) error {
-	const usage = "paddock lifecycle show\npaddock lifecycle configure [--worktree-ttl 168h] [--disposable-directories node_modules,.next]\n"
+	const usage = "paddock lifecycle archive|verify-archive|mark-shipped TASK_ID\npaddock lifecycle show\npaddock lifecycle configure [--worktree-ttl 168h] [--disposable-directories node_modules,.next]\n"
 	if len(args) == 0 || args[0] == "--help" {
 		fmt.Fprint(out, usage)
 		return nil
@@ -22,6 +22,35 @@ func runLifecycle(args []string, out io.Writer) error {
 	if opts["help"] != "" {
 		fmt.Fprint(out, usage)
 		return nil
+	}
+	if args[0] == "archive" || args[0] == "verify-archive" || args[0] == "mark-shipped" {
+		if len(pos) != 1 || len(opts) != 0 {
+			return fmt.Errorf("lifecycle %s requires exactly one task ID", args[0])
+		}
+		home, e := paddock.StateHome()
+		if e != nil {
+			return e
+		}
+		store, e := paddock.OpenStore(home)
+		if e != nil {
+			return e
+		}
+		defer store.Close()
+		service := paddock.Service{Store: store}
+		if args[0] == "mark-shipped" {
+			return service.MarkShipped(context.Background(), pos[0])
+		}
+		var a paddock.ConversationArchive
+		if args[0] == "archive" {
+			a, e = service.ArchiveConversation(context.Background(), pos[0])
+		} else {
+			a, e = service.VerifyArchive(pos[0])
+		}
+		if e != nil {
+			return e
+		}
+		a.Transcript = nil
+		return emit(out, a)
 	}
 	if len(pos) != 0 {
 		return fmt.Errorf("unexpected lifecycle arguments")

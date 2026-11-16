@@ -56,6 +56,7 @@ func (s Service) gcSandbox(ctx context.Context, t Task, config LifecycleConfig, 
 		return fail(e)
 	}
 	for _, check := range []func() error{
+		func() error { return shipmentGate(ctx, t) },
 		func() error { return sandboxWorkspaceIdentity(ctx, t) },
 		func() error { return cleanWorkspace(ctx, t, config) },
 		func() error { return verifyConversation(ctx, t) },
@@ -75,6 +76,9 @@ func (s Service) gcSandbox(ctx context.Context, t Task, config LifecycleConfig, 
 	r.Reason = "expired sandbox checkout; safety checks passed"
 	if !apply {
 		return r
+	}
+	if _, e = s.archiveConversation(ctx, t); e != nil {
+		return fail(e)
 	}
 	if e = s.Store.update(t.ID, func(v *Task) error { v.WorkspaceCommit = head; v.WorkspaceRemovedAt = now(); return nil }); e != nil {
 		return fail(e)

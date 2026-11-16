@@ -121,6 +121,9 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				return
 			}
 			check := func() error {
+				if err := shipmentGate(ctx, t); err != nil {
+					return err
+				}
 				if err := workspaceIdentity(ctx, t); err != nil {
 					return err
 				}
@@ -147,6 +150,11 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 			}
 			result.Eligible, result.Reason = true, "expired and all safety checks passed"
 			if !apply {
+				return
+			}
+			if _, err := s.archiveConversation(ctx, t); err != nil {
+				result.Eligible = false
+				result.Reason = "archive failed: " + err.Error()
 				return
 			}
 			head, err := taskGit(ctx, t, "rev-parse", "HEAD")

@@ -267,3 +267,8 @@ and continued model access in the same process have also been tested. An actual
 expiration soak and a production gateway restart remain unqualified. Deploying
 locally requires persistent gateway configuration and a dedicated model login;
 the test gateway and model provider are not deployment defaults.
+
+Checkout GC additionally requires host-operator shipment confirmation and an
+independent local task-linked transcript snapshot before removal. These snapshots
+are **not qualified native backups** and do not permit sandbox deletion or a
+shorter retention policy. See [shipment and archive limitations](lifecycle.md#shipment-gate-and-local-transcript-archives-review-subset).

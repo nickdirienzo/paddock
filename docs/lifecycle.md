@@ -244,3 +244,57 @@ require a rebuilt image. No new resident host service is introduced.
 
 Native drains that cannot finish, or cleanup whose ownership/process state is
 unknown, are retained for inspection without forced termination.
+
+## Shipment gate and local transcript archives (review subset)
+
+Checkout GC now requires an explicit shipment confirmation bound to the current
+HEAD. From the trusted host registry owner's shell, after independently verifying
+that the work shipped, run:
+
+```sh
+paddock lifecycle mark-shipped TASK_ID
+paddock lifecycle archive TASK_ID
+paddock lifecycle verify-archive TASK_ID
+```
+
+A stopped process, open PR, message, or agent statement never marks shipment.
+This explicit operator gate applies to tasks with and without PRs; automatic
+merged-PR verification is not implemented. The authorization boundary is access
+to the host registry, as with other lifecycle configuration. Sandbox task callers
+are rejected; do not expose this command through an agent-controlled host tool.
+New activity or a changed HEAD requires operator reconfirmation. Older task
+records remain readable and resumable but now fail closed for checkout collection
+until confirmed. Existing dirty/unpushed, process, pending-work, PR, and unknown
+checks still apply. The configured 168h retention and disposable policy do not
+change. Preview never creates an archive. Apply publishes and verifies one before
+writing the recovery checkpoint or removing the checkout.
+
+Archives live only at `REGISTRY/archives/TASK_ID.json` (directory 0700, files 0600).
+The versioned atomic envelope contains task/conversation/provider/runtime/workspace
+identity, timestamp, SHA256 and base64 exact JSONL bytes. `verify-archive` discovers
+by task ID and reports metadata without printing chat. A trusted operator can
+inspect the envelope's `transcript` using a local base64 decoder to recover readable
+context for Team Principal. SHA256 detects accidental corruption, not tampering
+by the registry owner. Interrupted temporary writes are ignored; publication failure
+retains the checkout, and retry creates a fresh snapshot. Only the single matching
+Claude `projects/*/ID.jsonl` or Codex `sessions/YYYY/MM/DD/rollout-*-ID.jsonl`
+is copied, on host or through sandbox maintenance. Missing, ambiguous, invalid,
+symlinked, or oversized history fails closed. Auth files, private keys, token stores,
+and agent-home configuration are excluded. Transcript text may itself contain
+sensitive conversation content; nothing is uploaded.
+
+**Native restoration is not qualified.** `native_restore_qualified` is always
+false. This subset offers transcript discovery, not automatic context injection
+or same-conversation revival after sandbox deletion. Claude subagents, attachments,
+Codex auxiliary state and version-specific import/index requirements are not
+captured. The current resume path still requires the original native home and,
+for OpenShell, the original sandbox. No whole-sandbox deletion is implemented.
+
+The requested 48-hour post-shipment window remains disabled until disposable
+Codex and Claude tests on both runtimes prove native import into an independent
+home, same-ID continuation with remembered context, and restoration of the task's
+Git objects/refs at the original workspace path. That requires a runtime reconstruction
+API and pinned provider-version validation, including interruption and missing or
+corrupt input. A readable transcript is insufficient evidence. Keep the sandbox,
+Git database and native home until those tests pass; a real task cannot currently
+be revived after its sandbox is deleted using this archive alone.

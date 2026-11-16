@@ -34,6 +34,8 @@ type Task struct {
 	LastActivityAt     string          `json:"last_activity_at,omitempty"`
 	IdleTTL            string          `json:"idle_ttl,omitempty"`
 	Idle               *IdleState      `json:"idle,omitempty"`
+	ShippedAt          string          `json:"shipped_at,omitempty"`
+	ShippedCommit      string          `json:"shipped_commit,omitempty"`
 	WorkspaceCommit    string          `json:"workspace_commit,omitempty"`
 	WorkspaceRemovedAt string          `json:"workspace_removed_at,omitempty"`
 	Session            Session         `json:"session"`
