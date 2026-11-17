@@ -492,8 +492,9 @@ integration dispatch and result retrieval. See
 [integration CLI](integrations.md). Model-backed orchestration is unavailable
 until its planner runs in OpenShell.
 
-`paddock lifecycle mark-shipped TASK_ID` confirms shipment of HEAD as the trusted
-host operator. `lifecycle archive`, `verify-archive`, and `context` provide private
+Merged task PRs are verified live for automatic shipment evidence, including all
+linked PRs in a context. `paddock lifecycle mark-shipped TASK_ID` is the trusted
+host operator fallback for work without verifiable merged PRs. `lifecycle archive`, `verify-archive`, and `context` provide private
 local chat archiving, verification, and task-ID discovery. Explicit
 `lifecycle expire TASK_ID [--apply]` provides a 48-hour post-shipment expiry path;
 `paddock revive TASK_ID` starts a new conversation on freshly fetched `origin/main`

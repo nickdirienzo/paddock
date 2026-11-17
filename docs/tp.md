@@ -63,5 +63,6 @@ For task workspaces intentionally expired after shipment, use
 `paddock revive TASK_ID` to start a new agent conversation on fresh `origin/main`
 under the same task ID. This is explicit context revival, separate from native
 `resume`; it does not restore the old checkout or replay its original assignment.
-Only mark shipment after the operator confirms it. See [workspace expiry and
+Shipment is verified from all linked PR merges; work without verifiable merged
+PRs requires operator confirmation. See [workspace expiry and
 revival](lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).

@@ -105,6 +105,9 @@ func (s Service) prepareRevivedWorkspace(ctx context.Context, t Task, source Rep
 	t.WorkspaceCommit, t.WorkspaceRemovedAt = "", ""
 	t.ShippedAt, t.ShippedCommit = "", ""
 	t.LastActivityAt = now()
+	t.LastWorkAt = t.LastActivityAt
+	t.ShipmentSource = ""
+	t.PullRequests = nil
 	t.Idle = nil
 	t.Session.Generation = next
 	t.Session.Resume = false

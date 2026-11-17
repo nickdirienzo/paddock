@@ -43,6 +43,15 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 	if err != nil {
 		return err
 	}
+	release, err := g.Service.Store.taskLease(task.ID, "operation")
+	if err != nil {
+		return err
+	}
+	defer release()
+	task, err = g.Service.Store.Get(task.ID)
+	if err != nil {
+		return err
+	}
 	if len(authors) == 0 {
 		return fmt.Errorf("--allow requires at least one user login or '*' for any user")
 	}
@@ -109,6 +118,18 @@ func (g GitHubCoordinator) Watch(ctx context.Context, raw, taskID string, author
 			return err
 		}
 		w.Authors[login] = id
+	}
+	// Retain the association independently of an active review watch.
+	if err := g.Service.Store.update(task.ID, func(v *Task) error {
+		for _, p := range v.PullRequests {
+			if strings.EqualFold(p.Repo, repo) && p.Number == n {
+				return nil
+			}
+		}
+		v.PullRequests = append(v.PullRequests, TaskPullRequest{Repo: repo, Number: n, HeadRepo: pr.Head.Repo.FullName, HeadRef: pr.Head.Ref})
+		return nil
+	}); err != nil {
+		return err
 	}
 	return g.Service.Store.UpdateGitHub(func(v *GitHubState) error {
 		if old, ok := v.Watches[w.Key()]; ok {

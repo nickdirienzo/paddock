@@ -256,7 +256,7 @@ silently switches to this recovery model.
 From the trusted host registry owner's shell:
 
 ```sh
-paddock lifecycle mark-shipped TASK_ID     # explicitly confirm shipment of HEAD
+paddock lifecycle mark-shipped TASK_ID     # operator fallback for work without PRs
 paddock lifecycle expire TASK_ID          # preview after the 48-hour warm window
 paddock lifecycle expire TASK_ID --apply  # archive first, then expire safely
 paddock lifecycle context TASK_ID         # read archived chat by task ID
@@ -265,19 +265,31 @@ paddock revive TASK_ID                    # fresh origin/main, new conversation
 
 Expiry is explicit and separate from checkout GC. It does not change the existing
 168h GC TTL, disposable-directory policy, or configure an automatic deletion loop.
-It waits 48 hours after shipment and activity. The operator must independently
-verify shipment; a stopped process, open PR, queued message, or agent statement
-never establishes it. The same explicit gate applies to tasks with and without PRs;
-automatic merged-PR verification is not implemented. Confirmation binds to HEAD
-and becomes invalid after new activity or changed commits. Revival clears it.
+It waits 48 hours after shipment and activity. For GitHub tasks, collection queries
+GitHub live: every durable task-linked PR and every PR discovered for the current
+task branch must be merged into the origin repository's `main` (the parent
+repository's `main` for forks). The most recently merged PR for the current branch
+must cover the exact checkout HEAD. Open, closed-unmerged, changed-identity,
+unknown, or incompletely enumerated PRs retain the workspace. Several PRs in one
+context are checked together; removing a review watch does not remove its durable
+PR association. Arbitrary PRs on unrelated branches cannot be inferred from chat;
+only verified task associations and current-branch discovery establish coverage.
+A GitHub merge of the exact head also proves pushed work if the remote branch was
+deleted after merging. New work admitted after shipment invalidates coverage;
+process exit alone does not. Legacy tasks without a work timestamp conservatively
+use their last activity. Revival clears shipment and starts a new PR inventory.
+
+Tasks without verifiable merged PRs fail closed unless the host operator explicitly
+uses `mark-shipped`; this fallback binds HEAD and last activity. A stopped process,
+open PR, queued message, or agent statement never establishes shipment.
 The authorization boundary is host registry access, as for lifecycle configuration.
 Sandbox task callers are rejected; do not expose operator lifecycle commands through
 an agent-controlled host tool.
 
 Both checkout GC and expiry retain dirty or unpushed work, active/unknown processes,
 open/unknown PRs, pending/uncertain work, missing native history, and unknown check
-results. Old records remain readable and resumable but need explicit shipment
-confirmation before collection. Expiry also protects unknown scratch entries under
+results. Old records remain readable and resumable; verifiable merged PRs or an
+explicit operator confirmation are required before collection. Expiry also protects unknown scratch entries under
 `/sandbox`; investigation sandboxes and Team Principal workspaces are retained.
 OpenShell process inspection uses `/proc`; unreadable state retains the sandbox.
 Ignored checkout files remain protected by the existing disposable-directory policy.

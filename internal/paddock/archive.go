@@ -274,7 +274,12 @@ func (s Service) MarkShipped(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.Store.update(t.ID, func(v *Task) error { v.ShippedCommit = head; v.ShippedAt = now(); return nil })
+	return s.Store.update(t.ID, func(v *Task) error {
+		v.ShippedCommit = head
+		v.ShippedAt = now()
+		v.ShipmentSource = "operator"
+		return nil
+	})
 }
 func shipmentGate(ctx context.Context, t Task) error {
 	if t.ShippedAt == "" || t.ShippedCommit == "" {
@@ -284,8 +289,15 @@ func shipmentGate(ctx context.Context, t Task) error {
 	if err != nil {
 		return err
 	}
-	if t.LastActivityAt != "" {
-		activity, e := time.Parse(time.RFC3339Nano, t.LastActivityAt)
+	if t.ShipmentSource == "github" && time.Since(shipped) < shippedWorkspaceRetention {
+		return fmt.Errorf("within 48-hour post-shipment retention period")
+	}
+	activityStamp := t.LastActivityAt
+	if t.ShipmentSource == "github" && t.LastWorkAt != "" {
+		activityStamp = t.LastWorkAt
+	}
+	if activityStamp != "" {
+		activity, e := time.Parse(time.RFC3339Nano, activityStamp)
 		if e != nil {
 			return e
 		}

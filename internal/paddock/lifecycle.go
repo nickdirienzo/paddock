@@ -117,7 +117,12 @@ func (s *Store) preparationActive(id string) (bool, error) {
 }
 
 func (s *Store) TouchActivity(id string) error {
-	return s.update(id, func(t *Task) error { t.LastActivityAt = now(); t.Idle = nil; return nil })
+	return s.update(id, func(t *Task) error {
+		t.LastActivityAt = now()
+		t.LastWorkAt = t.LastActivityAt
+		t.Idle = nil
+		return nil
+	})
 }
 
 func (s Service) Resume(ctx context.Context, id string) (Task, error) {
@@ -279,6 +284,7 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 		v.Session.StartedAt, v.Session.EndedAt = "", ""
 		v.Status, v.Error = "starting", ""
 		v.LastActivityAt = now()
+		v.LastWorkAt = v.LastActivityAt
 		v.WorkspaceRemovedAt = ""
 		return nil
 	}); err != nil {

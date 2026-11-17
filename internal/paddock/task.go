@@ -21,7 +21,17 @@ type TaskArchiveState struct {
 	ContextSHA256        string `json:"context_sha256"`
 }
 
+type TaskPullRequest struct {
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	HeadRepo string `json:"head_repo"`
+	HeadRef  string `json:"head_ref"`
+}
+
 type Task struct {
+	PullRequests       []TaskPullRequest `json:"pull_requests,omitempty"`
+	LastWorkAt         string            `json:"last_work_at,omitempty"`
+	ShipmentSource     string            `json:"shipment_source,omitempty"`
 	Archive            *TaskArchiveState `json:"archive,omitempty"`
 	launchNotice       string            // transient startup context; never changes the user's objective
 	Launcher           *LauncherConfig   `json:"launcher,omitempty"`

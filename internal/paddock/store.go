@@ -302,6 +302,7 @@ func (s *Store) claimGeneration(id string, generation *int) error {
 		t.Status = "running"
 		t.Session.StartedAt = now()
 		t.Session.ResumeNotice = ""
+		t.LastWorkAt = now()
 		t.LastActivityAt = now()
 		return nil
 	})

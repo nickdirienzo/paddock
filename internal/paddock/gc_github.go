@@ -30,6 +30,34 @@ func (s Service) noOpenPulls(ctx context.Context, t Task) error {
 	if err != nil {
 		return err
 	}
+	// A task can have PRs from several branches in one conversation. Check
+	// durable associations directly, including when their review watch is gone.
+	links := append([]TaskPullRequest(nil), t.PullRequests...)
+	for _, w := range state.Watches {
+		if w.TaskID == t.ID {
+			links = append(links, TaskPullRequest{w.Repo, w.Number, w.HeadRepo, w.HeadRef})
+		}
+	}
+	for _, link := range links {
+		_, identity, e := state.ResolveGitHubIdentity(link.Repo)
+		if e != nil {
+			return e
+		}
+		api := NewGitHubAPI(identity)
+		if e = api.ValidateIdentity(ctx); e != nil {
+			return e
+		}
+		p, e := api.Pull(ctx, link.Repo, link.Number)
+		if e != nil {
+			return e
+		}
+		if p.Number != link.Number || !strings.EqualFold(p.Base.Repo.FullName, link.Repo) || p.Head.Ref != link.HeadRef || !strings.EqualFold(p.Head.Repo.FullName, link.HeadRepo) {
+			return fmt.Errorf("linked PR identity changed")
+		}
+		if p.State != "closed" {
+			return fmt.Errorf("linked PR is open or unknown")
+		}
+	}
 	remotes, err := taskGit(ctx, t, "remote")
 	if err != nil {
 		return err

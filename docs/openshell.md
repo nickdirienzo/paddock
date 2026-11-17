@@ -269,7 +269,8 @@ expiration soak and a production gateway restart remain unqualified. Deploying
 locally requires persistent gateway configuration and a dedicated model login;
 the test gateway and model provider are not deployment defaults.
 
-Checkout GC requires host-operator shipment confirmation and a verified local chat
+Checkout GC requires verified merged task PRs (or explicit operator shipment for
+work without PRs) and a verified local chat
 snapshot. Explicit `paddock lifecycle expire TASK_ID --apply` can reclaim the whole
 stopped sandbox after a 48-hour post-shipment warm window and all safety checks.
 `paddock revive TASK_ID` then creates a fresh `origin/main` workspace and a new agent

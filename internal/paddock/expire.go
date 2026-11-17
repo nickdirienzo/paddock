@@ -106,6 +106,9 @@ func (s Service) expireTask(ctx context.Context, id string, apply bool, checks g
 	if t.Archive != nil && t.Archive.Phase != "revived" {
 		return fail(fmt.Errorf("task already has an archive checkpoint; inspect its lifecycle state"))
 	}
+	if e = s.resolveShipment(ctx, &t); e != nil {
+		return fail(e)
+	}
 	for _, stamp := range []string{t.ShippedAt, t.LastActivityAt} {
 		parsed, e := time.Parse(time.RFC3339Nano, stamp)
 		if e != nil {
@@ -182,6 +185,15 @@ func (s Service) expireTask(ctx context.Context, id string, apply bool, checks g
 		}
 	}
 	check := func() error {
+		if e := s.resolveShipment(ctx, &t); e != nil {
+			return e
+		}
+		for _, stamp := range []string{t.ShippedAt, t.LastActivityAt} {
+			parsed, e := time.Parse(time.RFC3339Nano, stamp)
+			if e != nil || time.Since(parsed) < shippedWorkspaceRetention {
+				return fmt.Errorf("within 48-hour post-shipment retention period or unknown timestamp")
+			}
+		}
 		if e := shipmentGate(ctx, t); e != nil {
 			return e
 		}
@@ -211,7 +223,7 @@ func (s Service) expireTask(ctx context.Context, id string, apply bool, checks g
 		if e = checks.processes(ctx, t); e != nil {
 			return e
 		}
-		if e = pushedWorkspace(ctx, t); e != nil {
+		if e = shippedWorkspacePushed(ctx, t); e != nil {
 			return e
 		}
 		if e = checks.pulls(ctx, t); e != nil {
@@ -227,6 +239,9 @@ func (s Service) expireTask(ctx context.Context, id string, apply bool, checks g
 	if !apply {
 		return r, nil
 	}
+	if e = s.saveShipment(t); e != nil {
+		return r, e
+	}
 	checkpoint, e := s.checkpointConversation(ctx, t)
 	if e != nil {
 		return fail(fmt.Errorf("archive checkpoint failed: %w", e))
@@ -240,7 +255,14 @@ func (s Service) expireTask(ctx context.Context, id string, apply bool, checks g
 		return fail(e)
 	}
 	checkpoint.Phase = "deleting"
-	if e = s.Store.update(t.ID, func(v *Task) error { v.Archive = &checkpoint; return nil }); e != nil {
+	if e = s.Store.update(t.ID, func(v *Task) error {
+		v.Archive = &checkpoint
+		v.ShippedAt = t.ShippedAt
+		v.ShippedCommit = t.ShippedCommit
+		v.ShipmentSource = t.ShipmentSource
+		v.PullRequests = t.PullRequests
+		return nil
+	}); e != nil {
 		return r, e
 	}
 	if sandbox {

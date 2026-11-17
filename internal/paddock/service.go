@@ -245,7 +245,7 @@ func (s Service) runHost(ctx context.Context, o RunOptions, repo Repository) (Ta
 	}
 	o.provenance.Capabilities = executionCapabilities(false, false)
 	t := Task{ID: id, Launcher: &o.launcher, Provenance: o.provenance, IdleTTL: o.IdleTTL, Role: o.Role, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, ParentID: o.Parent, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit,
-		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), Session: session}
+		Branch: "paddock/" + id, Worktree: filepath.Join(s.Store.Home, "worktrees", id), Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), LastWorkAt: now(), Session: session}
 	// Never put state or new worktrees inside the caller's checkout.
 	t.Runtime = "host"
 	if err = ValidateStateHome(s.Store.Home, repo.Root); err != nil {

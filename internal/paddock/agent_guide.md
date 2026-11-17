@@ -203,9 +203,10 @@ active processes, and pending work retain the workspace. Ordinary status inspect
 does not renew the TTL. Native conversations and branch refs are not collected.
 
 Shipped tasks can instead use explicit `paddock lifecycle expire TASK_ID [--apply]`
-after a 48-hour warm window. An authorized host operator must first confirm shipment
-of HEAD with `lifecycle mark-shipped TASK_ID`; do not infer shipment from an agent
-statement, process exit or an open PR. This does not change the seven-day GC policy.
+after a 48-hour warm window. Collection verifies all linked PRs are merged and
+that a merged PR covers current HEAD. Work without verifiable merged PRs requires
+an authorized host operator to use `lifecycle mark-shipped TASK_ID`; do not infer
+shipment from an agent statement, process exit or an open PR. This does not change the seven-day GC policy.
 Expiry archives public chat context before removing the checkout or OpenShell
 sandbox. Team Principal can inspect `lifecycle context TASK_ID` and explicitly use
 `paddock revive TASK_ID` to keep the task ID, fetch fresh `origin/main`, and launch
