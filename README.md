@@ -153,6 +153,11 @@ expire the workspace after a 48-hour warm window. `paddock revive TASK_ID` keeps
 the task ID and starts a new conversation with that context on fresh `origin/main`.
 See [task expiry and revival](docs/lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).
 
+An OpenShell child can report back with
+`paddock message PARENT_TASK_ID "Findings" --external-id report-1`.
+The host poller relays it to the registered parent. A pending receipt means
+queued; reuse the same external ID and body when retrying.
+
 Inside a sandboxed agent, `! paddock attach` opens a host shell in the live
 worktree. On a local OrbStack setup, files are already visible to Mac tools:
 

@@ -174,7 +174,7 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 				state.Error = err.Error()
 				return s.saveIdle(t, state)
 			}
-			if err := s.noPendingMessages(t.ID); err != nil {
+			if err := s.noPendingMessages(ctx, t); err != nil {
 				state.Error = err.Error()
 				return s.saveIdle(t, state)
 			}
@@ -231,7 +231,7 @@ func (s Service) reconcileIdle(ctx context.Context, clock time.Time, checks idle
 				state.Phase, state.Error = "waiting", err.Error()
 				return s.saveIdle(t, state)
 			}
-			if err = s.noPendingMessages(t.ID); err != nil {
+			if err = s.noPendingMessages(ctx, t); err != nil {
 				state.Phase, state.Error = "waiting", err.Error()
 				return s.saveIdle(t, state)
 			}
@@ -291,7 +291,7 @@ func (s Service) saveIdle(t Task, state IdleState) error {
 	})
 }
 
-func (s Service) noPendingMessages(id string) error {
+func (s Service) noPendingMessages(ctx context.Context, task Task) error {
 	files, err := filepath.Glob(filepath.Join(s.Store.Home, "messages", "*.json"))
 	if err != nil {
 		return err
@@ -305,8 +305,19 @@ func (s Service) noPendingMessages(id string) error {
 		if err = json.Unmarshal(data, &receipt); err != nil {
 			return err
 		}
-		if receipt.TaskID == id && receipt.Status != "delivered" {
+		if (receipt.TaskID == task.ID || receipt.Caller == "sandbox:"+task.ID) && receipt.Status != "delivered" {
 			return fmt.Errorf("pending or uncertain message delivery")
+		}
+	}
+	// A completed child may have published a report just before the host
+	// poller saw it. Keep its compute until the outbox has been acknowledged.
+	if task.RuntimeName() == "openshell" && task.ParentID != "" && task.OpenShell != nil && task.OpenShell.Ready {
+		request, err := sandboxOutput(ctx, task, "python3", "-c", readSandboxMessageRequest)
+		if err != nil {
+			return err
+		}
+		if request != "" {
+			return fmt.Errorf("pending sandbox parent message")
 		}
 	}
 	return nil

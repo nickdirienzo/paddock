@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 11 // v11 preserves per-session Codex TUI settings during poller updates.
+const githubPollerVersion = 12 // v12 relays sandbox messages to their registered parent.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -251,6 +251,9 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 	shelled := make(chan struct{})
 	go func() { defer close(shelled); g.Service.RunShellRequests(ctx) }()
 	defer func() { cancel(); <-shelled }()
+	messaged := make(chan struct{})
+	go func() { defer close(messaged); g.Service.RunSandboxMessages(ctx) }()
+	defer func() { cancel(); <-messaged }()
 	renewed := make(chan struct{})
 	go func() {
 		defer close(renewed)

@@ -204,7 +204,22 @@ identity and marked replies remain excluded. This sets the policy for newly crea
 tasks and discovered watches, without widening existing watches.
 Without this option, register a watch explicitly
 from the host. Sandboxed agents use ordinary `gh` for PRs/replies; the host owns task
-coordination. `paddock message TASK 'instructions'` uses the agent's native inbox inside
+coordination. Inside an OpenShell child, use
+`paddock message PARENT_TASK_ID 'Findings' [--external-id KEY] [--json]` to
+report to its registered parent, using the full parent task ID. The sandbox
+shortcut writes a bounded request; the host singleton resolves the sender and
+parent from its registry and uses the parent's native inbox. It accepts no
+host commands, paths, credentials, or unrelated task targets. Messages are
+limited to 64 KiB of UTF-8 text. A `pending` receipt means the host will retry
+an offline parent; it does not confirm delivery. Reuse the same external ID
+and body to inspect/retry the same message. Claimed or uncertain deliveries
+are retained in the host receipts and never automatically replayed.
+
+Updating the host CLI and restarting the shared poller upgrades the shortcut
+in running tasks; no runtime image rebuild is needed. The poller must be
+running for sandbox parent messages, including tasks without GitHub watches.
+
+From the host, `paddock message TASK 'instructions'` uses the agent's native inbox inside
 the sandbox, resuming the saved conversation when needed. New runtime images pin Claude to 2.1.325; 2.1.286 remains accepted for existing
 images and host sessions. Paddock verifies the inbox's
 process, conversation, and launch generation, then requires an exact persisted

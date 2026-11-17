@@ -13,13 +13,19 @@ See `paddock runtime --help`.
 Inside an OpenShell task, use ordinary `git` and `gh`; the host owns Paddock state
 and watches, and its CLI is not exposed in the sandbox. The host poller discovers
 PRs for the task's exact branch when approved `watch_authors` are configured.
-The sandbox's narrow `paddock attach` shortcut is an exception: it requests a
-host shell tab for this task, without exposing the host CLI or credentials.
+The sandbox shortcut supports `paddock attach` and
+`paddock message PARENT_TASK_ID "Findings" [--external-id KEY] [--json]`.
+Messages relay through the host poller to the task's registered parent only;
+use the full parent task ID. A `pending` receipt means queued for host retry,
+not delivered. Reuse the same `--external-id` and body when checking or retrying
+a message; uncertain deliveries are never automatically replayed.
+The shortcut exposes no host CLI or credentials. `attach` requests a host shell
+tab for this task.
 From the agent's shell-command mode use `! paddock attach`; in the resulting
 host shell, the sandbox's live worktree is already visible through OrbStack,
 so use `open <path>` or other Mac tools directly. Supplying a task ID to host `paddock attach`
 still reconnects to that task's existing agent.
-Run the following coordination commands on the host, not through a sandbox escape.
+Other coordination commands run on the host, not through a sandbox escape.
 
 ## Find your context
 
@@ -76,6 +82,8 @@ changes are not copied. Inspect the child's actual changes and validation before
 integrating them. A running session or delivery acknowledgement does not mean completion.
 
 Send instructions and results between existing Paddock tasks with `paddock message`.
+From OpenShell, this command is limited to reporting to the registered parent;
+the host can message other existing tasks.
 Use the native subagent messaging/result mechanism for native subagents. Do not use
 `rex send`, simulated typing, or Enter to communicate with an agent: these manipulate
 its interactive input and can collide with a user's draft. If native message delivery

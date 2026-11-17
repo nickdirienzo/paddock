@@ -113,11 +113,13 @@ func (s Service) OpenHostShell(ctx context.Context, task *Task, client string) (
 	return opened, term.selectRexSession(ctx, opened, client)
 }
 
-const installSandboxShell = `import glob,os,pathlib,sys
+const installSandboxShell = `import glob,os,pathlib,secrets,sys
 root=pathlib.Path('/sandbox/.paddock')
 (root/'bin').mkdir(parents=True,exist_ok=True,mode=0o700)
-p=root/'bin/paddock'
-p.write_text(sys.argv[1]); p.chmod(0o700)
+p=root/'bin'/('.paddock-'+secrets.token_hex(12))
+fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o700)
+with os.fdopen(fd,'w') as out: out.write(sys.argv[1])
+os.replace(p,root/'bin/paddock')
 line='\n# Paddock host-shell shortcut\nexport PATH="/sandbox/.paddock/bin:$PATH"\n'
 home=pathlib.Path('/home/sandbox')
 files=[home/n for n in ('.profile','.bashrc','.zprofile','.zshrc')]
@@ -245,13 +247,17 @@ func (s Service) RunShellRequests(ctx context.Context) {
 		tasks, err := s.Store.List("")
 		if err == nil {
 			for _, t := range tasks {
-				if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready || t.Session.Backend != "rex" || t.Status != "running" {
+				if t.RuntimeName() != "openshell" || t.OpenShell == nil || !t.OpenShell.Ready || t.Status != "running" {
 					continue
 				}
 				pass, cancel := context.WithTimeout(ctx, 10*time.Second)
 				key := fmt.Sprintf("%s/%d", t.ID, t.Session.Generation)
 				if !installed[key] {
 					installed[key] = installHostShellShortcut(pass, t) == nil
+				}
+				if t.Session.Backend != "rex" {
+					cancel()
+					continue
 				}
 				id, e := sandboxOutput(pass, t, "python3", "-c", readShellRequest)
 				if e == nil && validID(id) {

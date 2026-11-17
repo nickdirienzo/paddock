@@ -28,6 +28,9 @@ func agentPrompt(t Task, home, exe string) string {
 		"Communicate with existing Paddock agents through paddock message; never use terminal typing or simulated Enter as agent messaging."
 	if t.RuntimeName() == "openshell" {
 		prompt = t.Prompt + "\n\nPaddock task " + t.ID + ". This agent runs inside OpenShell. Work in " + t.Worktree + " on branch " + t.Branch + ". Prefer native subagents for short reviews. The host owns lifecycle and PR watches; do not create nested Paddock tasks or try to access host credentials. If OpenShell denies required network access, follow the policy-advisor instructions, submit the narrowest sufficient proposal, and wait for the operator decision. A policy denial means the task is blocked, not that the requested approach failed; do not substitute an incomplete result."
+		if t.ParentID != "" {
+			prompt += " Report to your parent with paddock message " + t.ParentID + " \"Your findings\". The sandbox shortcut relays only to this registered parent through the host poller. Report delivery as pending until a delivered receipt is confirmed; reuse --external-id when retrying the same message."
+		}
 		if t.OpenShell.Provider != "" {
 			prompt += " Use ordinary git and gh; GitHub requests authenticate as " + t.OpenShell.Identity.Login + " and are restricted to " + t.OpenShell.Repository + "."
 		} else {
