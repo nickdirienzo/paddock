@@ -147,6 +147,11 @@ paddock message TASK_ID "Add a regression test for the redirect"
 paddock resume TASK_ID
 ```
 
+After shipped work has been explicitly confirmed, you can archive its chat and
+expire the workspace after a 48-hour warm window. `paddock revive TASK_ID` keeps
+the task ID and starts a new conversation with that context on fresh `origin/main`.
+See [task expiry and revival](docs/lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).
+
 Inside a sandboxed agent, `! paddock attach` opens a host shell in the live
 worktree. On a local OrbStack setup, files are already visible to Mac tools:
 

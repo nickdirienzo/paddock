@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestArchiveIntegrityAndInterruptedPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.NativeRestoreQualified || len(a.Transcript) == 0 {
+	if a.NativeRestoreQualified || a.ContextText == "" || len(a.Transcript) != 0 {
 		t.Fatal(a)
 	}
 	dir := filepath.Join(s.Store.Home, "archives")
@@ -118,7 +119,7 @@ func TestSandboxArchiveReaderAndCodexLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "rollout-2026-11-16-"+task.Session.ConversationID+".jsonl")
-	data := []byte("{\"type\":\"session_meta\"}\n")
+	data := []byte("{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"fixture conversation\"}]}}\n")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +127,8 @@ func TestSandboxArchiveReaderAndCodexLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(a.Transcript) != string(data) {
-		t.Fatal("bytes changed")
+	if !strings.Contains(a.ContextText, "fixture conversation") || len(a.Transcript) != 0 {
+		t.Fatal("missing readable chat or retained unnecessary native state")
 	}
 	// Exercise the exact sandbox extraction program on disposable files, without a sandbox.
 	b, err := exec.Command("python3", "-c", archiveReadScript, path).Output()

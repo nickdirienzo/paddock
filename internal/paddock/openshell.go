@@ -492,7 +492,7 @@ func (s Service) provisionSandbox(ctx context.Context, t *Task) error {
 		if _, e = c.call(ctx, "profile", "import", "--file", profile); e != nil {
 			return e
 		}
-		if e = s.updateSandboxCredential(ctx, t, true); e != nil {
+		if e = s.updateSandboxCredential(ctx, t, t.Archive == nil || t.Archive.Phase != "reviving"); e != nil {
 			return e
 		}
 	}

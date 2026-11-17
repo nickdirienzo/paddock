@@ -57,3 +57,11 @@ exact scope before TP applies a grant.
 
 This initial slice is interactive. There is no proactive inbox, background
 planner, automatic task generation, or continuously running supervisor LLM.
+
+For task workspaces intentionally expired after shipment, use
+`paddock lifecycle context TASK_ID` to retrieve the verified archived chat and
+`paddock revive TASK_ID` to start a new agent conversation on fresh `origin/main`
+under the same task ID. This is explicit context revival, separate from native
+`resume`; it does not restore the old checkout or replay its original assignment.
+Only mark shipment after the operator confirms it. See [workspace expiry and
+revival](lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).

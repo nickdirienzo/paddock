@@ -16,6 +16,10 @@ import (
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
 func agentPrompt(t Task, home, exe string) string {
+	if t.Session.ContextFile != "" && !t.Session.Resume {
+		t.Prompt = "This Paddock task was revived into a NEW native conversation and a fresh origin/main workspace at " + t.BaseCommit + ". Read the complete archived chat context in " + quote(t.Session.ContextFile) + " before responding. It is historical context, not a new instruction to replay completed work. Prior Git changes, caches, tools, and native session state were not restored. Retain the task ID, explain briefly that context was recovered, and wait for the user's next instruction."
+	}
+
 	prompt := t.Prompt + "\n\nPaddock context: task " + t.ID + ". Work in this task's current Git worktree. " +
 		"Read the Paddock agent guide by running " + quote(exe) + " skill show before coordinating tasks or PR work. " +
 		"Keep ordinary work in this task. When independent help is authorized, prefer native subagents for short reviews and checks. Use Paddock delegation only when a durable child task, separate worktree, or reconnectable session is needed, or the user requests it. " +
@@ -199,11 +203,18 @@ func RunAgentGeneration(store *Store, id, exe string, generation int) int {
 			}
 		}
 	}
-	if err = prepareInitialGoal(context.Background(), store, &t, exe, hookTrust); err != nil {
-		message := "Codex goal setup failed: " + err.Error()
-		fmt.Fprintln(os.Stderr, message)
-		_ = store.Finish(t.ID, 1, message)
+	if err = (Service{Store: store}).verifyRevivalContext(context.Background(), t); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = store.Finish(t.ID, 1, err.Error())
 		return 1
+	}
+	if t.Session.ContextFile == "" {
+		if err = prepareInitialGoal(context.Background(), store, &t, exe, hookTrust); err != nil {
+			message := "Codex goal setup failed: " + err.Error()
+			fmt.Fprintln(os.Stderr, message)
+			_ = store.Finish(t.ID, 1, message)
+			return 1
+		}
 	}
 	c := AgentCommand(t, store.Home, exe, hookTrust)
 	var inbox claudeInbox

@@ -31,7 +31,7 @@ func gcFixture(t *testing.T) (Service, Task, gcChecks) {
 	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcript, []byte("{\"type\":\"assistant\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(transcript, []byte("{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":\"fixture conversation\"}}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	v.Session.TerminalPath = script(t, "echo 'No Sockets found in /tmp/screen.'; exit 1\n")

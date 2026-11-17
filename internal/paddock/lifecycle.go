@@ -189,6 +189,9 @@ func (s Service) resumeLocked(ctx context.Context, id string) (Task, error) {
 	if err != nil {
 		return t, err
 	}
+	if t.Archive != nil && (t.Archive.Phase == "archived" || t.Archive.Phase == "deleting" || t.Archive.Phase == "reviving") {
+		return t, fmt.Errorf("workspace lifecycle state is %s; use paddock revive after confirmed expiry, or inspect an incomplete operation", t.Archive.Phase)
+	}
 	if t.Idle != nil && (t.Idle.Phase == "releasing" || t.Idle.Phase == "draining") {
 		return t, fmt.Errorf("native idle release is being reconciled; retry after task stops")
 	}

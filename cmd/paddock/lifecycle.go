@@ -10,12 +10,22 @@ import (
 )
 
 func runLifecycle(args []string, out io.Writer) error {
-	const usage = "paddock lifecycle archive|verify-archive|mark-shipped TASK_ID\npaddock lifecycle show\npaddock lifecycle configure [--worktree-ttl 168h] [--disposable-directories node_modules,.next]\n"
+	const usage = "paddock lifecycle archive|verify-archive|context|mark-shipped TASK_ID\npaddock lifecycle expire TASK_ID [--apply]\npaddock lifecycle show\npaddock lifecycle configure [--worktree-ttl 168h] [--disposable-directories node_modules,.next]\n"
 	if len(args) == 0 || args[0] == "--help" {
 		fmt.Fprint(out, usage)
 		return nil
 	}
-	opts, pos, err := parse(args[1:], "worktree-ttl disposable-directories")
+	flags := ""
+	switch args[0] {
+	case "configure":
+		flags = "worktree-ttl disposable-directories"
+	case "expire":
+		flags = "apply"
+	case "archive", "verify-archive", "context", "mark-shipped", "show":
+	default:
+		return fmt.Errorf("unknown lifecycle command %q", args[0])
+	}
+	opts, pos, err := parse(args[1:], flags)
 	if err != nil {
 		return err
 	}
@@ -23,7 +33,26 @@ func runLifecycle(args []string, out io.Writer) error {
 		fmt.Fprint(out, usage)
 		return nil
 	}
-	if args[0] == "archive" || args[0] == "verify-archive" || args[0] == "mark-shipped" {
+	if args[0] == "expire" {
+		if len(pos) != 1 {
+			return fmt.Errorf("lifecycle expire requires one task ID")
+		}
+		home, e := paddock.StateHome()
+		if e != nil {
+			return e
+		}
+		store, e := paddock.OpenStore(home)
+		if e != nil {
+			return e
+		}
+		defer store.Close()
+		result, e := (paddock.Service{Store: store}).ExpireTask(context.Background(), pos[0], opts["apply"] != "")
+		if e != nil {
+			return e
+		}
+		return emit(out, result)
+	}
+	if args[0] == "archive" || args[0] == "verify-archive" || args[0] == "mark-shipped" || args[0] == "context" {
 		if len(pos) != 1 || len(opts) != 0 {
 			return fmt.Errorf("lifecycle %s requires exactly one task ID", args[0])
 		}
@@ -37,6 +66,14 @@ func runLifecycle(args []string, out io.Writer) error {
 		}
 		defer store.Close()
 		service := paddock.Service{Store: store}
+		if args[0] == "context" {
+			text, e := service.ArchivedContext(pos[0])
+			if e != nil {
+				return e
+			}
+			_, e = fmt.Fprint(out, text)
+			return e
+		}
 		if args[0] == "mark-shipped" {
 			return service.MarkShipped(context.Background(), pos[0])
 		}
@@ -50,6 +87,7 @@ func runLifecycle(args []string, out io.Writer) error {
 			return e
 		}
 		a.Transcript = nil
+		a.ContextText = ""
 		return emit(out, a)
 	}
 	if len(pos) != 0 {

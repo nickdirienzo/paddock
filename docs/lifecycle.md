@@ -245,56 +245,122 @@ require a rebuilt image. No new resident host service is introduced.
 Native drains that cannot finish, or cleanup whose ownership/process state is
 unknown, are retained for inspection without forced termination.
 
-## Shipment gate and local transcript archives (review subset)
+## Shipped work: archive chat, expire workspace, revive on fresh main
 
-Checkout GC now requires an explicit shipment confirmation bound to the current
-HEAD. From the trusted host registry owner's shell, after independently verifying
-that the work shipped, run:
+The recovery model is a **new agent conversation with archived chat context on
+freshly fetched `origin/main`**, keeping the same Paddock task ID. It does not
+rebuild the old Git database, caches, tools, goals, or native conversation. Ordinary
+`resume` still resumes the original native session while its state exists; it never
+silently switches to this recovery model.
+
+From the trusted host registry owner's shell:
 
 ```sh
-paddock lifecycle mark-shipped TASK_ID
-paddock lifecycle archive TASK_ID
-paddock lifecycle verify-archive TASK_ID
+paddock lifecycle mark-shipped TASK_ID     # explicitly confirm shipment of HEAD
+paddock lifecycle expire TASK_ID          # preview after the 48-hour warm window
+paddock lifecycle expire TASK_ID --apply  # archive first, then expire safely
+paddock lifecycle context TASK_ID         # read archived chat by task ID
+paddock revive TASK_ID                    # fresh origin/main, new conversation
 ```
 
-A stopped process, open PR, message, or agent statement never marks shipment.
-This explicit operator gate applies to tasks with and without PRs; automatic
-merged-PR verification is not implemented. The authorization boundary is access
-to the host registry, as with other lifecycle configuration. Sandbox task callers
-are rejected; do not expose this command through an agent-controlled host tool.
-New activity or a changed HEAD requires operator reconfirmation. Older task
-records remain readable and resumable but now fail closed for checkout collection
-until confirmed. Existing dirty/unpushed, process, pending-work, PR, and unknown
-checks still apply. The configured 168h retention and disposable policy do not
-change. Preview never creates an archive. Apply publishes and verifies one before
-writing the recovery checkpoint or removing the checkout.
+Expiry is explicit and separate from checkout GC. It does not change the existing
+168h GC TTL, disposable-directory policy, or configure an automatic deletion loop.
+It waits 48 hours after shipment and activity. The operator must independently
+verify shipment; a stopped process, open PR, queued message, or agent statement
+never establishes it. The same explicit gate applies to tasks with and without PRs;
+automatic merged-PR verification is not implemented. Confirmation binds to HEAD
+and becomes invalid after new activity or changed commits. Revival clears it.
+The authorization boundary is host registry access, as for lifecycle configuration.
+Sandbox task callers are rejected; do not expose operator lifecycle commands through
+an agent-controlled host tool.
 
-Archives live only at `REGISTRY/archives/TASK_ID.json` (directory 0700, files 0600).
-The versioned atomic envelope contains task/conversation/provider/runtime/workspace
-identity, timestamp, SHA256 and base64 exact JSONL bytes. `verify-archive` discovers
-by task ID and reports metadata without printing chat. A trusted operator can
-inspect the envelope's `transcript` using a local base64 decoder to recover readable
-context for Team Principal. SHA256 detects accidental corruption, not tampering
-by the registry owner. Interrupted temporary writes are ignored; publication failure
-retains the checkout, and retry creates a fresh snapshot. Only the single matching
-Claude `projects/*/ID.jsonl` or Codex `sessions/YYYY/MM/DD/rollout-*-ID.jsonl`
-is copied, on host or through sandbox maintenance. Missing, ambiguous, invalid,
-symlinked, or oversized history fails closed. Auth files, private keys, token stores,
-and agent-home configuration are excluded. Transcript text may itself contain
-sensitive conversation content; nothing is uploaded.
+Both checkout GC and expiry retain dirty or unpushed work, active/unknown processes,
+open/unknown PRs, pending/uncertain work, missing native history, and unknown check
+results. Old records remain readable and resumable but need explicit shipment
+confirmation before collection. Expiry also protects unknown scratch entries under
+`/sandbox`; investigation sandboxes and Team Principal workspaces are retained.
+OpenShell process inspection uses `/proc`; unreadable state retains the sandbox.
+Ignored checkout files remain protected by the existing disposable-directory policy.
 
-**Native restoration is not qualified.** `native_restore_qualified` is always
-false. This subset offers transcript discovery, not automatic context injection
-or same-conversation revival after sandbox deletion. Claude subagents, attachments,
-Codex auxiliary state and version-specific import/index requirements are not
-captured. The current resume path still requires the original native home and,
-for OpenShell, the original sandbox. No whole-sandbox deletion is implemented.
+Host expiry removes only the managed checkout, preserving branch refs and native
+agent homes. OpenShell expiry deletes the stopped sandbox, reclaiming its workload
+filesystem, including caches, private Git data and native state. It does not remove
+the shared runtime image or task-specific credential providers. No host agent-home
+cleanup is implemented. Explicit shipment confirmation authorizes discarding the
+sandbox's known runtime state; this is a chat archive, not a backup of arbitrary
+files in `/tmp` or elsewhere outside the managed checkout. Keep important artifacts
+in Git or export them before shipment. Unknown scratch under `/sandbox` blocks expiry.
 
-The requested 48-hour post-shipment window remains disabled until disposable
-Codex and Claude tests on both runtimes prove native import into an independent
-home, same-ID continuation with remembered context, and restoration of the task's
-Git objects/refs at the original workspace path. That requires a runtime reconstruction
-API and pinned provider-version validation, including interruption and missing or
-corrupt input. A readable transcript is insufficient evidence. Keep the sandbox,
-Git database and native home until those tests pass; a real task cannot currently
-be revived after its sandbox is deleted using this archive alone.
+### Local archive and deletion ordering
+
+`lifecycle archive TASK_ID` snapshots public user/assistant text from the one matching
+Codex `sessions/YYYY/MM/DD/rollout-*-ID.jsonl` or Claude `projects/*/ID.jsonl`.
+It briefly starts stopped OpenShell maintenance compute, then stops it without
+starting an agent. `verify-archive TASK_ID` checks the latest snapshot for the
+current native session and prints metadata. `context TASK_ID` uses the immutable
+expiry checkpoint, so Team Principal can discover historical context even after
+revival changes the native session ID.
+
+Version 2 stores readable quoted user/assistant messages and task, source-native-ID,
+runtime, generation, workspace and timestamp metadata, with SHA256 checks. It omits
+tool results, reasoning, private keys, token stores and agent-home configuration.
+Messages with unsupported external attachments fail closed rather than silently
+losing their content. Native JSONL input is bounded at 64 MiB; readable context is
+bounded at 2 MiB, with errors instead of silent truncation. A later expiry includes
+prior revived context as well as the new session's public chat. Version 1 raw
+transcript archives remain readable. Neither format is a native session backup;
+`native_restore_qualified` remains false.
+
+Archives remain local under `REGISTRY/archives` (0700 directory, 0600 files).
+The latest snapshot is `TASK_ID.json`; expiry additionally writes a content-addressed
+immutable checkpoint and saves its full-envelope hash in the task record. Files and
+directories are synced before deletion intent is committed. SHA256 detects accidental
+corruption, not tampering by the registry owner. No external archive service receives
+chat. Revival copies the verified readable context only into the replacement sandbox
+on the task's pinned gateway, where the new agent reads it through normal provider
+access. Public chat text itself can contain sensitive information; protect the registry.
+
+Apply creates and verifies the checkpoint, repeats every safety check, and persists
+`archive.phase=deleting` **before** removal. Sandbox maintenance is stopped and
+ownership/`Stopped` state are checked before delete. Success requires a complete
+paginated sandbox list proving absence, not a failed `get` or a delete acknowledgement
+alone. Failed/unknown deletion retains the checkpoint and tombstone. A repeated
+`expire --apply` only verifies absence and reconciles the record; it never blindly
+retries deletion. Interrupted atomic temporary writes are ignored. Missing/corrupt
+or public-readable archives prevent expiry/revival.
+
+### Fresh workspace revival and validation
+
+`revive` requires a confirmed expired workspace, a valid immutable archive, no active
+or unknown process, no competing lifecycle operation, and no pending work. It fetches
+`origin/main` explicitly and fails on unavailable transport, missing main, or stale
+refs. It does not switch or copy the source checkout, including untracked files.
+Host tasks get a new task branch; OpenShell tasks get a replacement sandbox using
+the pinned runtime/provider/identity settings and fresh source commit. No additional
+Paddock task is created.
+
+The initial prompt instructs the new agent to read a verified private context file,
+acknowledge recovery and wait for the user's next instruction. It does not replay
+the original assignment or goal. Codex discovers a new native ID; Claude receives a
+new UUID. Native tools, approvals and authentication still belong to the configured
+provider. Partial provisioning or launch errors retain the immutable archive and
+workspace identity for inspection; uncertain operations are not automatically retried.
+Do not manually reset lifecycle fields while a process or partial sandbox may exist.
+
+Disposable tests cover archive-before-delete ordering, interrupted publication,
+failed/uncertain stop/delete, corruption, protection gates, fresh-main fetches, source
+untracked-file preservation, host supervisors, and real OpenShell bootstrap scripts
+executed through a fixture gateway. Opt-in installed Codex/Claude tests prove a new
+conversation reads the context file and includes historical user/assistant text in
+its next model request, using isolated homes and local model fixtures:
+
+```sh
+PADDOCK_NATIVE_CODEX=/path/to/codex PADDOCK_NATIVE_CLAUDE=/path/to/claude \
+  go test ./internal/paddock -run '^TestNativeRevivalContextIngestion$' -v
+```
+
+A real gateway-backed delete/create/revival acceptance run has **not** been performed
+by this change. No real sandbox or native agent home was deleted, no live registry GC
+was applied, and live policy was unchanged. The implemented path supports fresh-session
+context recovery after sandbox deletion; exact native-session restoration is intentionally
+outside the clarified recovery contract.

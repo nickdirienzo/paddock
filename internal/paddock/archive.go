@@ -13,11 +13,13 @@ import (
 	"time"
 )
 
-// ConversationArchive is a transcript snapshot, not a qualified native backup.
+// ConversationArchive stores readable chat for a new session, not a native backup.
 // No credentials, provider configuration, or agent-home directories are copied.
 type ConversationArchive struct {
 	Generation             int    `json:"generation"`
 	ShippedCommit          string `json:"shipped_commit,omitempty"`
+	ContextText            string `json:"context_text,omitempty"`
+	ContextSHA256          string `json:"context_sha256,omitempty"`
 	Version                int    `json:"version"`
 	TaskID                 string `json:"task_id"`
 	ConversationID         string `json:"conversation_id"`
@@ -26,11 +28,11 @@ type ConversationArchive struct {
 	Worktree               string `json:"worktree"`
 	CreatedAt              string `json:"created_at"`
 	SHA256                 string `json:"sha256"`
-	Transcript             []byte `json:"transcript"`
+	Transcript             []byte `json:"transcript,omitempty"`
 	NativeRestoreQualified bool   `json:"native_restore_qualified"`
 }
 
-// A single atomic envelope binds the manifest and exact transcript bytes. An
+// A single atomic envelope binds the manifest and readable chat bytes. An
 // interrupted write cannot publish a manifest pointing at incomplete data.
 func (s Service) ArchiveConversation(ctx context.Context, id string) (ConversationArchive, error) {
 	t, err := s.Store.Get(id)
@@ -53,6 +55,30 @@ func (s Service) ArchiveConversation(ctx context.Context, id string) (Conversati
 	defer releaseProcess()
 	if t.Status == "running" || t.Status == "starting" || t.Status == "preparing" {
 		return ConversationArchive{}, fmt.Errorf("task may still be running")
+	}
+	_, obs := terminalFor(t.Session).Inspect(ctx, t)
+	if obs.State != "missing" && obs.State != "exited" {
+		return ConversationArchive{}, fmt.Errorf("terminal process is active or unknown")
+	}
+	if t.RuntimeName() == "openshell" {
+		if t.OpenShell == nil {
+			return ConversationArchive{}, fmt.Errorf("missing pinned sandbox")
+		}
+		state, e := inspectTaskSandbox(ctx, t)
+		if e != nil {
+			return ConversationArchive{}, e
+		}
+		if state.Phase != "Stopped" {
+			return ConversationArchive{}, fmt.Errorf("sandbox must be confirmed stopped before archival")
+		}
+		if _, e = t.OpenShell.Config.call(ctx, "sandbox", "start", t.OpenShell.Name); e != nil {
+			return ConversationArchive{}, e
+		}
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			_, _ = t.OpenShell.Config.call(stopCtx, "sandbox", "stop", t.OpenShell.Name)
+		}()
 	}
 	return s.archiveConversation(ctx, t)
 }
@@ -103,7 +129,28 @@ func (s Service) archiveConversation(ctx context.Context, t Task) (ConversationA
 		}
 	}
 	sum := sha256.Sum256(b)
-	a = ConversationArchive{Generation: t.Session.Generation, ShippedCommit: t.ShippedCommit, Version: 1, TaskID: t.ID, ConversationID: t.Session.ConversationID, Agent: t.Session.Agent, Runtime: t.RuntimeName(), Worktree: t.Worktree, CreatedAt: now(), SHA256: hex.EncodeToString(sum[:]), Transcript: b}
+	a = ConversationArchive{Generation: t.Session.Generation, ShippedCommit: t.ShippedCommit, Version: 2, TaskID: t.ID, ConversationID: t.Session.ConversationID, Agent: t.Session.Agent, Runtime: t.RuntimeName(), Worktree: t.Worktree, CreatedAt: now(), SHA256: hex.EncodeToString(sum[:]), Transcript: b}
+	contextText, contextErr := conversationContext(a)
+	if contextErr != nil {
+		return a, contextErr
+	}
+	if t.Session.ContextFile != "" {
+		prior, e := s.loadArchivedContext(t)
+		if e != nil {
+			return a, e
+		}
+		contextText = prior + "\n\nLATER CONVERSATION IN TASK " + t.ID + "\n" + contextText
+	}
+	if len(contextText) > maxConversationContextBytes {
+		return a, fmt.Errorf("combined conversation exceeds context limit; refusing truncation")
+	}
+	a.ContextText = contextText
+	contextSum := sha256.Sum256([]byte(contextText))
+	a.ContextSHA256 = hex.EncodeToString(contextSum[:])
+	// Version 2 retains only public chat text. Tool traces, reasoning and native
+	// implementation state are not needed for fresh-session context recovery.
+	a.Transcript = nil
+	a.SHA256 = a.ContextSHA256
 	dir := filepath.Join(s.Store.Home, "archives")
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return a, err
@@ -114,6 +161,9 @@ func (s Service) archiveConversation(ctx context.Context, t Task) (ConversationA
 	}
 	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return a, fmt.Errorf("archive directory must be private and not a symlink")
+	}
+	if err = syncDirectory(s.Store.Home); err != nil {
+		return a, err
 	}
 	if err = writeJSONAtomic(filepath.Join(dir, t.ID+".json"), a); err != nil {
 		return a, err
@@ -137,19 +187,19 @@ print(json.dumps(base64.b64encode(b).decode()))`
 
 func readArchiveRegular(path string) ([]byte, error) {
 	for parent := filepath.Dir(path); parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
-		info, err := os.Lstat(parent)
-		if err != nil {
-			return nil, err
+		info, e := os.Lstat(parent)
+		if e != nil {
+			return nil, e
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("symlink or non-directory archive path")
+			return nil, fmt.Errorf("symlink or non-directory archive parent")
 		}
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > 90<<20 {
+	if !info.Mode().IsRegular() || info.Size() > 100<<20 {
 		return nil, fmt.Errorf("archive input must be a bounded regular file")
 	}
 	f, err := os.Open(path)
@@ -164,8 +214,8 @@ func readArchiveRegular(path string) ([]byte, error) {
 	if !os.SameFile(info, opened) {
 		return nil, fmt.Errorf("archive input changed")
 	}
-	b, err := io.ReadAll(io.LimitReader(f, 90<<20+1))
-	if len(b) > 90<<20 {
+	b, err := io.ReadAll(io.LimitReader(f, 100<<20+1))
+	if len(b) > 100<<20 {
 		return nil, fmt.Errorf("archive input exceeds limit")
 	}
 	return b, err
@@ -177,16 +227,26 @@ func (s Service) VerifyArchive(id string) (ConversationArchive, error) {
 	if err != nil {
 		return a, err
 	}
-	b, err := readArchiveRegular(filepath.Join(s.Store.Home, "archives", t.ID+".json"))
+	archivePath := filepath.Join(s.Store.Home, "archives", t.ID+".json")
+	if err = privateArchivePath(archivePath); err != nil {
+		return a, err
+	}
+	b, err := readArchiveRegular(archivePath)
 	if err != nil {
 		return a, err
 	}
 	if err = json.Unmarshal(b, &a); err != nil {
 		return a, err
 	}
-	sum := sha256.Sum256(a.Transcript)
-	if a.Generation != t.Session.Generation || a.ShippedCommit != t.ShippedCommit || a.Version != 1 || a.TaskID != t.ID || a.ConversationID != t.Session.ConversationID || a.Agent != t.Session.Agent || a.Runtime != t.RuntimeName() || a.Worktree != t.Worktree || a.NativeRestoreQualified || len(a.Transcript) == 0 || a.SHA256 != hex.EncodeToString(sum[:]) {
-		return a, fmt.Errorf("archive identity or integrity check failed")
+	if a.Generation != t.Session.Generation || a.ShippedCommit != t.ShippedCommit || (a.Version != 1 && a.Version != 2) || a.TaskID != t.ID || a.ConversationID != t.Session.ConversationID || a.Agent != t.Session.Agent || a.Runtime != t.RuntimeName() || a.Worktree != t.Worktree || a.NativeRestoreQualified {
+		return a, fmt.Errorf("archive identity check failed")
+	}
+	if a.Version == 1 {
+		if len(a.Transcript) == 0 || digest(a.Transcript) != a.SHA256 {
+			return a, fmt.Errorf("native archive integrity failure")
+		}
+	} else if a.ContextText == "" || len(a.Transcript) != 0 || digest([]byte(a.ContextText)) != a.ContextSHA256 || a.ContextSHA256 != a.SHA256 {
+		return a, fmt.Errorf("readable archive integrity failure")
 	}
 	return a, nil
 }

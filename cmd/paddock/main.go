@@ -37,6 +37,7 @@ const help = `Paddock — a local control plane for coding agents
   paddock access pending|show|approve|reject
   paddock identity create|configure|list|show|disable|enable|verify
   paddock runtime show|configure|check|default
+  paddock revive TASK_ID [--json] [--detach]
   paddock gc [--apply] [--json]
   paddock lifecycle show|configure
   paddock github --help
@@ -209,7 +210,14 @@ func printTask(w io.Writer, t paddock.Task) {
 		fmt.Fprintln(w, "Last activity:", t.LastActivityAt)
 	}
 	if t.WorkspaceRemovedAt != "" {
-		fmt.Fprintln(w, "Workspace GC checkpoint:", t.WorkspaceCommit)
+		fmt.Fprintln(w, "Workspace checkpoint:", t.WorkspaceCommit)
+	}
+	if t.Archive != nil {
+		fmt.Fprintln(w, "Chat archive:", t.Archive.Phase)
+		fmt.Fprintln(w, "Archived context: paddock lifecycle context", t.ID)
+		if t.Archive.Phase == "archived" {
+			fmt.Fprintln(w, "Revive on fresh origin/main: paddock revive", t.ID)
+		}
 	}
 	if t.Session.ExitCode != nil {
 		fmt.Fprintln(w, "Exit code:", *t.Session.ExitCode)
@@ -275,7 +283,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity launcher codex-tui requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity launcher codex-tui requester requester-source external-id context-file json", "resume": "json detach client codex-tui", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity launcher codex-tui requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity launcher codex-tui requester requester-source external-id context-file json", "resume": "json detach client codex-tui", "revive": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -395,6 +403,12 @@ func run(args []string, out io.Writer) error {
 			return e
 		}
 		return emit(out, artifacts)
+	case "revive":
+		t, err := service.Revive(ctx, pos[0])
+		if err != nil {
+			return err
+		}
+		return presentLaunchedTask(ctx, "run", t, o, out, os.Stderr, service.Attach)
 	case "resume":
 		t, err := service.ResumeWithCodexTUI(ctx, pos[0], o["codex-tui"])
 		if err != nil {
