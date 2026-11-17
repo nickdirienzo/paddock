@@ -44,13 +44,14 @@ func (g GitHubAPI) BotUserID(ctx context.Context, login string) (int64, error) {
 }
 
 type PullRequest struct {
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	Number  int    `json:"number"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
-	HTMLURL string `json:"html_url"`
-	Head    struct {
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	Number   int    `json:"number"`
+	State    string `json:"state"`
+	MergedAt string `json:"merged_at"`
+	Merged   bool   `json:"merged"`
+	HTMLURL  string `json:"html_url"`
+	Head     struct {
 		Ref  string `json:"ref"`
 		SHA  string `json:"sha"`
 		Repo struct {
@@ -58,6 +59,7 @@ type PullRequest struct {
 		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
+		Ref  string `json:"ref"`
 		Repo struct {
 			FullName string `json:"full_name"`
 		} `json:"repo"`

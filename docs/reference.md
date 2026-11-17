@@ -274,6 +274,7 @@ PADDOCK_LIVE_MISE=1 mise exec -- go test ./internal/paddock -run TestLiveMiseTru
 | `paddock launcher list\|show\|configure` | Inspect or edit named launcher configs. |
 | `paddock tp` | Reconnect to the persistent host Team Principal conversation. |
 | `paddock identity create\|configure\|show\|verify` | Create, inspect, and verify a named agent identity. |
+| `paddock revive <id>` | Start a new conversation with archived chat context on fresh `origin/main`, after confirmed expiry. |
 | `paddock attach <id>` | Select the terminal in a Rex app, or attach to Screen in the current terminal. |
 | `paddock delegate "prompt" --parent <id>` | Create a child with an independent worktree and terminal. |
 
@@ -490,3 +491,12 @@ Use `paddock run --external-id`, `paddock message --external-id`,
 integration dispatch and result retrieval. See
 [integration CLI](integrations.md). Model-backed orchestration is unavailable
 until its planner runs in OpenShell.
+
+Merged task PRs are verified live for automatic shipment evidence, including all
+linked PRs in a context. `paddock lifecycle mark-shipped TASK_ID` is the trusted
+host operator fallback for work without verifiable merged PRs. `lifecycle archive`, `verify-archive`, and `context` provide private
+local chat archiving, verification, and task-ID discovery. Explicit
+`lifecycle expire TASK_ID [--apply]` provides a 48-hour post-shipment expiry path;
+`paddock revive TASK_ID` starts a new conversation on freshly fetched `origin/main`
+with archived context and the same task ID. The 168h checkout-GC policy remains
+unchanged. See [the recovery contract and validation](lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).

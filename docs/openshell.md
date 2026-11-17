@@ -250,8 +250,9 @@ Resume recreates a collected checkout and explicitly reports that build artifact
 and uncommitted files were not recovered.
 
 Deleting a sandbox through OpenShell/Docker also deletes its retained conversation
-and Git state. Paddock never does this as routine GC and refuses to invent a fresh
-conversation when that state is missing. This is persistence across process exit,
+and Git state. Routine checkout GC does not do this. `resume` refuses to invent a fresh
+conversation when that state is missing; explicit archived-context `revive` uses
+the new-conversation recovery model described below. This is persistence across process exit,
 not a backup or a sandbox snapshotting system.
 
 ## Qualification status
@@ -267,3 +268,13 @@ and continued model access in the same process have also been tested. An actual
 expiration soak and a production gateway restart remain unqualified. Deploying
 locally requires persistent gateway configuration and a dedicated model login;
 the test gateway and model provider are not deployment defaults.
+
+Checkout GC requires verified merged task PRs (or explicit operator shipment for
+work without PRs) and a verified local chat
+snapshot. Explicit `paddock lifecycle expire TASK_ID --apply` can reclaim the whole
+stopped sandbox after a 48-hour post-shipment warm window and all safety checks.
+`paddock revive TASK_ID` then creates a fresh `origin/main` workspace and a new agent
+conversation supplied with archived public chat context. It keeps the task ID and
+pinned runtime/identity; it does not rebuild the old Git database or native session.
+The seven-day checkout-GC policy remains unchanged. See
+[expiry, archive ordering, and revival](lifecycle.md#shipped-work-archive-chat-expire-workspace-revive-on-fresh-main).

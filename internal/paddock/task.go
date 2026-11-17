@@ -9,34 +9,59 @@ import (
 )
 
 // Task owns its worktree. Agent and terminal details belong to its Session.
+type TaskArchiveState struct {
+	Phase                string `json:"phase"`
+	File                 string `json:"file"`
+	SHA256               string `json:"sha256"`
+	SourceConversationID string `json:"source_conversation_id"`
+	SourceGeneration     int    `json:"source_generation"`
+	PreviousBranch       string `json:"previous_branch"`
+	PreviousWorktree     string `json:"previous_worktree"`
+	CapturedAt           string `json:"captured_at"`
+	ContextSHA256        string `json:"context_sha256"`
+}
+
+type TaskPullRequest struct {
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	HeadRepo string `json:"head_repo"`
+	HeadRef  string `json:"head_ref"`
+}
+
 type Task struct {
-	launchNotice       string          // transient startup context; never changes the user's objective
-	Launcher           *LauncherConfig `json:"launcher,omitempty"`
-	Provenance         TaskProvenance  `json:"provenance,omitzero"`
-	Role               string          `json:"role,omitempty"`
-	Runtime            string          `json:"runtime,omitempty"` // empty on legacy host tasks
-	OpenShell          *OpenShellTask  `json:"openshell,omitempty"`
-	ID                 string          `json:"id"`
-	SignalID           string          `json:"signal_id,omitempty"`
-	RelatedTaskID      string          `json:"related_task_id,omitempty"`
-	ParentID           string          `json:"parent_id,omitempty"`
-	Prompt             string          `json:"prompt"`
-	Repo               string          `json:"repo"`
-	CommonDir          string          `json:"common_dir"`
-	Base               string          `json:"base"`
-	BaseCommit         string          `json:"base_commit"`
-	Branch             string          `json:"branch"`
-	Worktree           string          `json:"worktree"`
-	Status             string          `json:"status"`
-	Error              string          `json:"error,omitempty"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	LastActivityAt     string          `json:"last_activity_at,omitempty"`
-	IdleTTL            string          `json:"idle_ttl,omitempty"`
-	Idle               *IdleState      `json:"idle,omitempty"`
-	WorkspaceCommit    string          `json:"workspace_commit,omitempty"`
-	WorkspaceRemovedAt string          `json:"workspace_removed_at,omitempty"`
-	Session            Session         `json:"session"`
+	PullRequests       []TaskPullRequest `json:"pull_requests,omitempty"`
+	LastWorkAt         string            `json:"last_work_at,omitempty"`
+	ShipmentSource     string            `json:"shipment_source,omitempty"`
+	Archive            *TaskArchiveState `json:"archive,omitempty"`
+	launchNotice       string            // transient startup context; never changes the user's objective
+	Launcher           *LauncherConfig   `json:"launcher,omitempty"`
+	Provenance         TaskProvenance    `json:"provenance,omitzero"`
+	Role               string            `json:"role,omitempty"`
+	Runtime            string            `json:"runtime,omitempty"` // empty on legacy host tasks
+	OpenShell          *OpenShellTask    `json:"openshell,omitempty"`
+	ID                 string            `json:"id"`
+	SignalID           string            `json:"signal_id,omitempty"`
+	RelatedTaskID      string            `json:"related_task_id,omitempty"`
+	ParentID           string            `json:"parent_id,omitempty"`
+	Prompt             string            `json:"prompt"`
+	Repo               string            `json:"repo"`
+	CommonDir          string            `json:"common_dir"`
+	Base               string            `json:"base"`
+	BaseCommit         string            `json:"base_commit"`
+	Branch             string            `json:"branch"`
+	Worktree           string            `json:"worktree"`
+	Status             string            `json:"status"`
+	Error              string            `json:"error,omitempty"`
+	CreatedAt          string            `json:"created_at"`
+	UpdatedAt          string            `json:"updated_at"`
+	LastActivityAt     string            `json:"last_activity_at,omitempty"`
+	IdleTTL            string            `json:"idle_ttl,omitempty"`
+	Idle               *IdleState        `json:"idle,omitempty"`
+	ShippedAt          string            `json:"shipped_at,omitempty"`
+	ShippedCommit      string            `json:"shipped_commit,omitempty"`
+	WorkspaceCommit    string            `json:"workspace_commit,omitempty"`
+	WorkspaceRemovedAt string            `json:"workspace_removed_at,omitempty"`
+	Session            Session           `json:"session"`
 }
 
 // TaskProvenance is fixed when the trusted host creates a task. Requester and
@@ -55,6 +80,9 @@ type TaskProvenance struct {
 }
 
 type Session struct {
+	ContextFile     string     `json:"context_file,omitempty"`
+	ContextSHA256   string     `json:"context_sha256,omitempty"`
+	RevivedFrom     string     `json:"revived_from,omitempty"`
 	Generation      int        `json:"generation,omitempty"`
 	Resume          bool       `json:"resume,omitempty"`
 	ResumeNotice    string     `json:"resume_notice,omitempty"`

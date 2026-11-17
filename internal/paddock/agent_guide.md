@@ -202,6 +202,19 @@ TTL is seven days. Unknown safety checks, local changes, unpushed work, open PRs
 active processes, and pending work retain the workspace. Ordinary status inspection
 does not renew the TTL. Native conversations and branch refs are not collected.
 
+Shipped tasks can instead use explicit `paddock lifecycle expire TASK_ID [--apply]`
+after a 48-hour warm window. Collection verifies all linked PRs are merged and
+that a merged PR covers current HEAD. Work without verifiable merged PRs requires
+an authorized host operator to use `lifecycle mark-shipped TASK_ID`; do not infer
+shipment from an agent statement, process exit or an open PR. This does not change the seven-day GC policy.
+Expiry archives public chat context before removing the checkout or OpenShell
+sandbox. Team Principal can inspect `lifecycle context TASK_ID` and explicitly use
+`paddock revive TASK_ID` to keep the task ID, fetch fresh `origin/main`, and launch
+a NEW agent conversation with that context. It does not restore old Git/native state
+or replay completed instructions. `resume` remains same-native-conversation recovery.
+Partial or uncertain expiry/revival requires inspection; do not invent replacement
+tasks or edit lifecycle records to bypass protections. See docs/lifecycle.md.
+
 Paddock does not yet automatically stop an interactive agent after a turn. Do not
 infer completion from terminal silence, use a raw Stop hook to kill the agent,
 or close a session that may be waiting for approval.

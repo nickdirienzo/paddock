@@ -121,6 +121,12 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				return
 			}
 			check := func() error {
+				if err := s.resolveShipment(ctx, &t); err != nil {
+					return err
+				}
+				if err := shipmentGate(ctx, t); err != nil {
+					return err
+				}
 				if err := workspaceIdentity(ctx, t); err != nil {
 					return err
 				}
@@ -136,7 +142,7 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				if err := checks.processes(ctx, t); err != nil {
 					return err
 				}
-				if err := pushedWorkspace(ctx, t); err != nil {
+				if err := shippedWorkspacePushed(ctx, t); err != nil {
 					return err
 				}
 				return checks.pulls(ctx, t)
@@ -147,6 +153,16 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 			}
 			result.Eligible, result.Reason = true, "expired and all safety checks passed"
 			if !apply {
+				return
+			}
+			if err := s.saveShipment(t); err != nil {
+				result.Eligible = false
+				result.Reason = err.Error()
+				return
+			}
+			if _, err := s.archiveConversation(ctx, t); err != nil {
+				result.Eligible = false
+				result.Reason = "archive failed: " + err.Error()
 				return
 			}
 			head, err := taskGit(ctx, t, "rev-parse", "HEAD")
@@ -180,6 +196,15 @@ func (s Service) gc(ctx context.Context, apply bool, checks gcChecks) ([]GCResul
 				} else if current != head {
 					err = fmt.Errorf("workspace changed during GC")
 				}
+			}
+			if err == nil {
+				err = s.resolveShipment(ctx, &t)
+			}
+			if err == nil {
+				err = shipmentGate(ctx, t)
+			}
+			if err == nil {
+				err = checks.pulls(ctx, t)
 			}
 			if err == nil {
 				_, err = git(ctx, t.CommonDir, "worktree", "remove", "--", t.Worktree)

@@ -25,12 +25,13 @@ func gcFixture(t *testing.T) (Service, Task, gcChecks) {
 	v.Worktree = filepath.Join(s.Home, "worktrees", v.ID)
 	v.LastActivityAt = time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
 	v.Status = "stopped"
+	v.ShippedAt, v.ShippedCommit = now(), r.Commit
 	v.Session.Agent, v.Session.AgentHome, v.Session.ConversationID = "claude", t.TempDir(), newConversationID()
 	transcript := filepath.Join(v.Session.AgentHome, "projects", "test", v.Session.ConversationID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcript, []byte("{\"type\":\"assistant\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(transcript, []byte("{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":\"fixture conversation\"}}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	v.Session.TerminalPath = script(t, "echo 'No Sockets found in /tmp/screen.'; exit 1\n")
@@ -67,6 +68,9 @@ func TestGCRetainsWarmWorkspaceThenRecoversTaskHead(t *testing.T) {
 	gitTest(t, task.Worktree, "commit", "-m", "task work")
 	gitTest(t, task.Worktree, "push")
 	head := gitTest(t, task.Worktree, "rev-parse", "HEAD")
+	if err := s.MarkShipped(context.Background(), task.ID); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := os.ReadFile(s.Store.path(task.ID))
 	preview := gcOne(t, s, false, checks)
 	if !preview.Eligible || preview.Removed {
@@ -188,6 +192,9 @@ func TestGCDisposableArtifactsAreExplicit(t *testing.T) {
 	gitTest(t, task.Worktree, "add", ".gitignore")
 	gitTest(t, task.Worktree, "commit", "-m", "ignore build")
 	gitTest(t, task.Worktree, "push")
+	if err := s.MarkShipped(context.Background(), task.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(task.Worktree, "build"), 0700); err != nil {
 		t.Fatal(err)
 	}
