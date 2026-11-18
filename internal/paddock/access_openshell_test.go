@@ -278,3 +278,31 @@ func TestOpenShellAccessGatewayUsesPinnedVerifiedMTLSOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenShellAccessGatewayIgnoresServerBootstrapTLSDir(t *testing.T) {
+	config := accessMTLSFixture(t)
+	// Paddock pins its server/bootstrap TLS directory separately from the named
+	// gateway's client identity, just as the installed OpenShell CLI does.
+	config.TLSDir = filepath.Join(t.TempDir(), "bootstrap-tls")
+	if err := os.MkdirAll(config.TLSDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ca.crt", "tls.crt", "tls.key"} {
+		if err := os.WriteFile(filepath.Join(config.TLSDir, name), []byte("not client material"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("OPENSHELL_LOCAL_TLS_DIR", config.TLSDir)
+	address, tlsConfig, err := resolveAccessGateway(config)
+	if err != nil || address != "gateway.example:8080" || tlsConfig.ServerName != "gateway.example" || tlsConfig.InsecureSkipVerify || tlsConfig.RootCAs == nil || len(tlsConfig.Certificates) != 1 {
+		t.Fatal(address, tlsConfig, err)
+	}
+	// The bootstrap directory must never become an authentication fallback.
+	clientKey := filepath.Join(config.ConfigHome, "openshell", "gateways", config.Gateway, "mtls", "tls.key")
+	if err := os.Remove(clientKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveAccessGateway(config); err == nil {
+		t.Fatal("accepted missing named-gateway client identity")
+	}
+}

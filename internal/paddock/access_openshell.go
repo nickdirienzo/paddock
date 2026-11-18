@@ -391,12 +391,9 @@ func resolveAccessGateway(config OpenShellConfig) (string, *tls.Config, error) {
 		return failure()
 	}
 	materials := filepath.Join(userGateway, "mtls")
-	// OPENSHELL_LOCAL_TLS_DIR is a local-gateway bootstrap override, not an
-	// alternative CLI client-certificate layout in the pinned TLS resolver.
-	// Refuse a mismatched override rather than silently selecting credentials.
-	if config.TLSDir != "" && filepath.Clean(config.TLSDir) != materials {
-		return failure()
-	}
+	// OPENSHELL_LOCAL_TLS_DIR is a server/bootstrap override. Like the pinned
+	// CLI, resolve client credentials only from this named gateway's mTLS
+	// profile, independently of config.TLSDir.
 	ca, err := readAccessRegularFile(filepath.Join(materials, "ca.crt"), 1<<20)
 	if err != nil {
 		return failure()
