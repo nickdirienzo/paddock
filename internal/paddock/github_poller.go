@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 13 // v13 upgrades the access guide and recovers notification outboxes.
+const githubPollerVersion = 14 // v14 uses named-profile mTLS independently of gateway bootstrap TLS.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
