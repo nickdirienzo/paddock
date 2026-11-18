@@ -2,140 +2,129 @@ package paddock
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"testing"
 )
-
-const accessFixture = `Network Rules:  (version 4, 2 chunks)
-
-  Chunk: 4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89
-  Status: pending
-  Rule: allow_pypi_org_443
-  Binary: /opt/uv
-  Confidence: 75%
-  Rationale: Allow uv to connect to pypi.org:443 (HTTPS).
-  Prover: prover: no new findings
-  Candidate: 2bcf80473a74
-  Endpoints: pypi.org:443 [L4]
-  Binaries: /opt/uv
-  Hits: 14 (first seen today)
-
-  Chunk: ef5aaeb0-8a88-4430-be71-09eccbb10b19
-  Status: pending
-  Rule: allow_api_github_com_443
-  Binary: /usr/bin/codex
-  Confidence: 65%
-  Rationale: Allow codex to connect to api.github.com:443 (HTTPS).
-  Security: credential reach expansion
-  Application: candidate canonicalization failed
-  Endpoints: api.github.com:443 [L4]
-  Binaries: /usr/bin/codex
-`
 
 func accessTaskFixture() Task {
 	task := taskFixture()
 	task.Runtime = "openshell"
 	task.Status = "running"
-	task.OpenShell = &OpenShellTask{Name: "pd-fixture", Ready: true, Config: OpenShellConfig{Binary: "/bin/false", Gateway: "fixture", Workspace: "default"}}
+	task.OpenShell = &OpenShellTask{ID: "fixture-sandbox-id", Name: "pd-fixture", Ready: true, Config: OpenShellConfig{Binary: "/bin/false", Gateway: "fixture", Workspace: "default"}}
 	task.Session.Agent = "unsupported"
 	return task
 }
 
-func TestParseOpenShellRules(t *testing.T) {
-	task := accessTaskFixture()
-	requests, err := parseOpenShellRules([]byte(accessFixture), task)
-	if err != nil || len(requests) != 2 {
-		t.Fatalf("%+v %v", requests, err)
-	}
-	if requests[0].ID != "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89" || requests[0].TaskID != task.ID || requests[0].Endpoints != "pypi.org:443 [L4]" || requests[0].Hits == "" {
-		t.Fatalf("wrong first proposal: %+v", requests[0])
-	}
-	if requests[1].ApplicationError != "candidate canonicalization failed" || len(requests[1].Security) != 1 {
-		t.Fatalf("lost review warnings: %+v", requests[1])
-	}
-	if _, err = parseOpenShellRules([]byte("  Chunk: not-a-uuid\n  Status: pending\n"), task); err == nil {
-		t.Fatal("accepted unsafe proposal identity")
-	}
-}
-
-func TestAccessPersistenceAndDecision(t *testing.T) {
+func TestAccessPersistenceAndDecisionUseOneStructuredLedger(t *testing.T) {
 	home := t.TempDir()
 	store := openTestStore(t, home)
 	task := accessTaskFixture()
-	state := filepath.Join(t.TempDir(), "state")
-	calls := filepath.Join(t.TempDir(), "calls")
-	bin := script(t, `
-state=`+quote(state)+`
-calls=`+quote(calls)+`
-case "$5 $6" in
-  'rule get')
-    status=pending
-    if test -f "$state"; then status=$(cat "$state"); fi
-    sed "s/Status: pending/Status: $status/g" <<'EOF'
-`+accessFixture+`EOF
-    ;;
-  'rule approve')
-    printf '%s\n' "$*" >> "$calls"
-    printf approved > "$state"
-    ;;
-  'rule reject')
-    printf '%s\n' "$*" >> "$calls"
-    printf rejected > "$state"
-    ;;
-esac
-`)
-	task.OpenShell.Config.Binary = bin
 	if err := store.Insert(task); err != nil {
 		t.Fatal(err)
 	}
-	service := Service{Store: store}
-	newRequests, err := service.SyncAccess(context.Background(), task)
-	if err != nil || len(newRequests) != 2 {
-		t.Fatalf("%+v %v", newRequests, err)
-	}
-	if again, err := service.SyncAccess(context.Background(), task); err != nil || len(again) != 0 {
-		t.Fatalf("sync was not idempotent: %+v %v", again, err)
+	id := "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89"
+	backend := &accessReviewBackend{inspection: OpenShellAccessInspection{SandboxID: task.OpenShell.ID, ExactRuleBound: true, Chunks: []OpenShellAccessChunk{
+		{ID: id, Status: "pending", RuleName: "allow_pypi", Rule: json.RawMessage(`{"name":"allow_pypi","endpoints":[{"host":"pypi.org","ports":[443]}],"binaries":[{"path":"/opt/uv"}]}`), ReviewToken: "reviewed-token"},
+		{ID: "ef5aaeb0-8a88-4430-be71-09eccbb10b19", Status: "rejected", RuleName: "other", Rule: json.RawMessage(`{"name":"other"}`), ReviewToken: "other-token"},
+	}}}
+	service := Service{Store: store, accessBackend: backend}
+	requests, err := service.SyncAccess(context.Background(), task)
+	if err != nil || len(requests) != 1 || requests[0].ID != id {
+		t.Fatal(requests, err)
 	}
 	request, err := store.GetAccess("4cf929e5")
-	if err != nil || request.Status != "pending" {
+	if err != nil || request.Status != "pending" || request.Rule != "allow_pypi" || request.Endpoints != "pypi.org:443" || request.Binary != "/opt/uv" {
 		t.Fatal(request, err)
 	}
-	if err = service.noPendingAccess(task.ID); err == nil {
-		t.Fatal("pending access did not protect task retention")
+	if err := service.noPendingAccess(task.ID); err == nil {
+		t.Fatal("pending ledger did not retain workspace")
 	}
-	request, err = service.DecideAccess(context.Background(), request.ID, "approve", "")
-	if err != nil || request.Status != "approved" || request.DecidedAt == "" {
-		t.Fatalf("decision not reconciled: %+v %v", request, err)
+	request, err = service.DecideAccess(context.Background(), id, "approve", "")
+	if err != nil || request.Status != "approved" || request.DecidedAt == "" || request.Decision != "approve" || request.AgentNotificationError == "" {
+		t.Fatal(request, err)
 	}
-	if request.AgentNotificationError == "" {
-		t.Fatal("missing durable agent notification failure")
-	}
-	b, err := os.ReadFile(calls)
-	if err != nil || !strings.Contains(string(b), "rule approve pd-fixture --chunk-id "+request.ID) {
-		t.Fatalf("wrong OpenShell decision: %s %v", b, err)
+	if backend.approveCalls != 1 || backend.approvedToken != "reviewed-token" {
+		t.Fatal("did not use captured structured token", backend.approveCalls, backend.approvedToken)
 	}
 	pending, err := store.ListAccess(task.ID, "pending")
 	if err != nil || len(pending) != 0 {
-		t.Fatalf("wrong pending inbox: %+v %v", pending, err)
+		t.Fatal(pending, err)
 	}
-	if err = service.noPendingAccess(task.ID); err != nil {
-		t.Fatal("resolved access still blocked retention:", err)
+	if err := service.noPendingAccess(task.ID); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(home, "access"))
+	if !os.IsNotExist(err) && (err != nil || len(entries) != 0) {
+		t.Fatal("new access wrote a duplicate legacy inbox", entries, err)
+	}
+	if _, err := os.Stat(store.accessStatePath(task.ID)); err != nil {
+		t.Fatal("missing authoritative ledger", err)
+	}
+}
+
+func TestAccessDesktopNotificationClaimsShareLedger(t *testing.T) {
+	t.Setenv("PADDOCK_DESKTOP_NOTIFICATIONS", "0")
+	s, task, _, id := accessReviewFixture(t)
+	// An integration can observe the request before the desktop poller. Discovery
+	// must not consume its notification, but delivery intent must consume it once.
+	if view := s.ShowAccessV1(context.Background(), task.ID, id, true); view.Error != nil {
+		t.Fatal(view)
+	}
+	pending, err := s.SyncAccess(context.Background(), task)
+	if err != nil || len(pending) != 1 {
+		t.Fatal(pending, err)
+	}
+	other := openTestStore(t, s.Store.Home)
+	claimed := make(chan []AccessRequest, 2)
+	errors := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, store := range []*Store{s.Store, other} {
+		wg.Add(1)
+		go func(store *Store) {
+			defer wg.Done()
+			r, e := store.claimAccessDesktop(task.ID, pending)
+			claimed <- r
+			errors <- e
+		}(store)
+	}
+	wg.Wait()
+	close(claimed)
+	close(errors)
+	count := 0
+	for r := range claimed {
+		count += len(r)
+	}
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count != 1 {
+		t.Fatal("desktop intent was not claimed exactly once", count)
+	}
+	again, err := s.SyncAccess(context.Background(), task)
+	if err != nil || len(again) != 0 {
+		t.Fatal(again, err)
+	}
+	state, err := s.Store.accessState(task.ID)
+	if err != nil || state.Requests[id].NotifiedAt == "" {
+		t.Fatal(state, err)
+	}
+	projected, err := s.Store.GetAccess(id)
+	if err != nil || projected.NotifiedAt != state.Requests[id].NotifiedAt {
+		t.Fatal(projected, err)
 	}
 }
 
 func TestAccessRejectRequiresReason(t *testing.T) {
-	store := openTestStore(t, t.TempDir())
-	task := accessTaskFixture()
-	if err := store.Insert(task); err != nil {
+	s, task, _, id := accessReviewFixture(t)
+	if _, err := s.SyncAccess(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	request := AccessRequest{ID: "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89", TaskID: task.ID, Sandbox: task.OpenShell.Name, Status: "pending"}
-	if _, _, err := store.upsertAccess(task, request); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := (Service{Store: store}).DecideAccess(context.Background(), request.ID, "reject", ""); err == nil {
-		t.Fatal("accepted unexplained rejection")
+	if _, err := s.DecideAccess(context.Background(), id, "reject", ""); err == nil {
+		t.Fatal("accepted rejection without a reason")
 	}
 }

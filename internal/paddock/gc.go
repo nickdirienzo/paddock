@@ -287,6 +287,9 @@ func pushedWorkspace(ctx context.Context, t Task) error {
 }
 
 func (s Service) noPendingWork(id string) error {
+	if err := s.noPendingAccessDecisions(id); err != nil {
+		return err
+	}
 	if err := s.noPendingAccess(id); err != nil {
 		return err
 	}

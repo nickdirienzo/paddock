@@ -1,23 +1,19 @@
 package paddock
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 )
 
-// AccessRequest mirrors one OpenShell network-rule proposal. OpenShell remains
-// authoritative for the rule and its status; Paddock persists enough metadata
-// to provide a durable operator inbox and notification audit.
+// AccessRequest is the legacy operator projection. Structured proposals,
+// decisions and notification metadata are stored only in access-v1 ledgers.
 type AccessRequest struct {
 	ID                       string   `json:"id"`
 	TaskID                   string   `json:"task_id"`
@@ -68,48 +64,32 @@ func validAccessID(id string) bool {
 	return true
 }
 
-func (s *Store) accessPath(id string) string { return filepath.Join(s.Home, "access", id+".json") }
-
-func (s *Store) readAccess(id string) (AccessRequest, error) {
-	var record accessRecord
-	if !validAccessID(id) {
-		return record.AccessRequest, fmt.Errorf("invalid access request ID %q", id)
-	}
-	b, err := os.ReadFile(s.accessPath(id))
-	if err != nil {
-		return record.AccessRequest, err
-	}
-	if err = json.Unmarshal(b, &record); err != nil {
-		return record.AccessRequest, fmt.Errorf("read access request %s: %w", id, err)
-	}
-	if record.Version != 1 || record.ID != id {
-		return record.AccessRequest, fmt.Errorf("access request %s has invalid persisted identity", id)
-	}
-	return record.AccessRequest, nil
-}
-
 func (s *Store) getAccess(prefix string) (AccessRequest, error) {
 	if prefix == "" {
 		return AccessRequest{}, fmt.Errorf("access request ID is required")
 	}
-	entries, err := os.ReadDir(filepath.Join(s.Home, "access"))
+	old, err := s.readLegacyAccessRequests("")
 	if err != nil {
 		return AccessRequest{}, err
 	}
-	id := ""
-	for _, entry := range entries {
-		candidate := strings.TrimSuffix(entry.Name(), ".json")
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") && strings.HasPrefix(candidate, prefix) {
-			if id != "" {
-				return AccessRequest{}, fmt.Errorf("access request prefix %q is ambiguous", prefix)
-			}
-			id = candidate
+	requests, err := s.mergeModernAccess(old, "", "")
+	if err != nil {
+		return AccessRequest{}, err
+	}
+	var found AccessRequest
+	for _, r := range requests {
+		if !strings.HasPrefix(r.ID, prefix) {
+			continue
 		}
+		if found.ID != "" {
+			return found, fmt.Errorf("access request prefix %q is ambiguous", prefix)
+		}
+		found = r
 	}
-	if id == "" {
-		return AccessRequest{}, fmt.Errorf("access request %q not found", prefix)
+	if found.ID == "" {
+		return found, fmt.Errorf("access request %q not found", prefix)
 	}
-	return s.readAccess(id)
+	return found, nil
 }
 
 func (s *Store) GetAccess(prefix string) (AccessRequest, error) {
@@ -121,23 +101,12 @@ func (s *Store) GetAccess(prefix string) (AccessRequest, error) {
 func (s *Store) ListAccess(taskID, status string) ([]AccessRequest, error) {
 	requests := []AccessRequest{}
 	err := s.withLock(func() error {
-		entries, err := os.ReadDir(filepath.Join(s.Home, "access"))
+		old, err := s.readLegacyAccessRequests(taskID)
 		if err != nil {
 			return err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-				continue
-			}
-			request, err := s.readAccess(strings.TrimSuffix(entry.Name(), ".json"))
-			if err != nil {
-				return err
-			}
-			if (taskID == "" || request.TaskID == taskID) && (status == "" || request.Status == status) {
-				requests = append(requests, request)
-			}
-		}
-		return nil
+		requests, err = s.mergeModernAccess(old, taskID, status)
+		return err
 	})
 	sort.Slice(requests, func(i, j int) bool {
 		if requests[i].CreatedAt == requests[j].CreatedAt {
@@ -148,188 +117,100 @@ func (s *Store) ListAccess(taskID, status string) ([]AccessRequest, error) {
 	return requests, err
 }
 
-func (s *Store) upsertAccess(task Task, incoming AccessRequest) (AccessRequest, bool, error) {
-	var saved AccessRequest
-	created := false
-	err := s.withLock(func() error {
-		if task.OpenShell == nil || incoming.Sandbox != task.OpenShell.Name || !validAccessID(incoming.ID) {
-			return fmt.Errorf("access request does not match its OpenShell task")
-		}
-		if _, err := s.read(task.ID); err != nil {
-			return err
-		}
-		existing, err := s.readAccess(incoming.ID)
-		if errors.Is(err, os.ErrNotExist) {
-			created = true
-			incoming.CreatedAt = now()
-			existing = incoming
-		} else if err != nil {
-			return err
-		} else {
-			if existing.TaskID != task.ID || existing.Sandbox != incoming.Sandbox {
-				return fmt.Errorf("access request identity changed")
-			}
-			createdAt, notifiedAt := existing.CreatedAt, existing.NotifiedAt
-			decision, reason, decidedAt := existing.Decision, existing.DecisionReason, existing.DecidedAt
-			decisionError, agentError, desktopError := existing.DecisionError, existing.AgentNotificationError, existing.DesktopNotificationError
-			existing = incoming
-			existing.CreatedAt, existing.NotifiedAt = createdAt, notifiedAt
-			existing.Decision, existing.DecisionReason, existing.DecidedAt = decision, reason, decidedAt
-			existing.DecisionError, existing.AgentNotificationError = decisionError, agentError
-			existing.DesktopNotificationError = desktopError
-		}
-		existing.UpdatedAt = now()
-		if err = writeJSONAtomic(s.accessPath(existing.ID), accessRecord{Version: 1, AccessRequest: existing}); err != nil {
-			return err
-		}
-		saved = existing
-		return nil
-	})
-	return saved, created, err
-}
-
-func (s *Store) updateAccess(id string, fn func(*AccessRequest)) error {
-	return s.withLock(func() error {
-		request, err := s.readAccess(id)
-		if err != nil {
-			return err
-		}
-		fn(&request)
-		request.UpdatedAt = now()
-		return writeJSONAtomic(s.accessPath(request.ID), accessRecord{Version: 1, AccessRequest: request})
-	})
-}
-
-func parseOpenShellRules(output []byte, task Task) ([]AccessRequest, error) {
-	if task.OpenShell == nil {
-		return nil, fmt.Errorf("task has no OpenShell sandbox")
-	}
-	requests := []AccessRequest{}
-	var current *AccessRequest
-	finish := func() error {
-		if current == nil {
-			return nil
-		}
-		if !validAccessID(current.ID) || current.Status == "" {
-			return fmt.Errorf("OpenShell returned an incomplete network-rule proposal")
-		}
-		requests = append(requests, *current)
-		current = nil
-		return nil
-	}
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	scanner.Buffer(make([]byte, 4096), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "Chunk: ") {
-			if err := finish(); err != nil {
-				return nil, err
-			}
-			current = &AccessRequest{ID: strings.TrimSpace(strings.TrimPrefix(line, "Chunk: ")), TaskID: task.ID, Sandbox: task.OpenShell.Name}
-			continue
-		}
-		if current == nil || line == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ": ")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "Status":
-			current.Status = strings.ToLower(value)
-		case "Rule":
-			current.Rule = value
-		case "Binary":
-			current.Binary = value
-		case "Confidence":
-			current.Confidence = value
-		case "Rationale":
-			current.Rationale = value
-		case "Prover":
-			current.Prover = value
-		case "Candidate":
-			current.Candidate = value
-		case "Endpoints":
-			current.Endpoints = value
-		case "Binaries":
-			current.Binaries = value
-		case "Hits":
-			current.Hits = value
-		case "Security":
-			current.Security = append(current.Security, value)
-		case "Application":
-			current.ApplicationError = value
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if err := finish(); err != nil {
-		return nil, err
-	}
-	return requests, nil
-}
-
-// SyncAccess mirrors OpenShell's current proposal view. OpenShell owns the
-// actual rule and status; Paddock never synthesizes or broadens a proposal.
+// SyncAccess refreshes the same structured ledger used by integration decisions.
+// Its result contains pending desktop-notification candidates, not a second inbox.
 func (s Service) SyncAccess(ctx context.Context, task Task) ([]AccessRequest, error) {
-	if task.RuntimeName() != "openshell" || task.OpenShell == nil || !task.OpenShell.Ready {
-		return nil, fmt.Errorf("task %s has no ready OpenShell sandbox", task.ID)
+	response := s.ListAccessV1(ctx, task.ID, true)
+	if response.Error != nil {
+		return nil, response.Error
 	}
-	output, err := task.OpenShell.Config.call(ctx, "rule", "get", task.OpenShell.Name)
+	if response.Refresh.State != "fresh" {
+		return nil, fmt.Errorf("access inspection was not fresh")
+	}
+	pending := map[string]bool{}
+	for _, r := range response.Requests {
+		if r.Status == "pending" {
+			pending[r.ID] = true
+		}
+	}
+	projected, err := s.Store.ListAccess(task.ID, "pending")
 	if err != nil {
 		return nil, err
 	}
-	parsed, err := parseOpenShellRules(output, task)
-	if err != nil {
-		return nil, err
-	}
-	newPending := []AccessRequest{}
-	for _, request := range parsed {
-		saved, created, err := s.Store.upsertAccess(task, request)
-		if err != nil {
-			return newPending, err
-		}
-		if created && saved.Status == "pending" {
-			newPending = append(newPending, saved)
+	out := []AccessRequest{}
+	for _, r := range projected {
+		if pending[r.ID] && r.NotifiedAt == "" {
+			out = append(out, r)
 		}
 	}
-	return newPending, nil
+	return out, nil
 }
 
-// SyncRunningAccess is used by the shared host poller. Grouping notifications
-// by task avoids one desktop alert per CDN redirect or package host.
+// Claim once before desktop delivery. A crash can suppress an informational
+// notification, but concurrent pollers cannot send duplicate alerts. Grant and
+// native-message recovery remain independently durable.
+func (s *Store) claimAccessDesktop(taskID string, requests []AccessRequest) ([]AccessRequest, error) {
+	claimed := []AccessRequest{}
+	err := s.updateAccessState(taskID, func(state *accessTaskState) error {
+		for _, request := range requests {
+			r := state.Requests[request.ID]
+			if r == nil || r.View.Status != "pending" || r.NotifiedAt != "" {
+				continue
+			}
+			r.NotifiedAt = now()
+			r.DesktopNotificationError = ""
+			claimed = append(claimed, legacyAccessView(*state, r, AccessRequest{}))
+		}
+		return nil
+	})
+	return claimed, err
+}
+
 func (s Service) SyncRunningAccess(ctx context.Context) error {
 	tasks, err := s.Store.List("")
 	if err != nil {
 		return err
 	}
-	var errs []error
+	var failures []error
 	for _, task := range tasks {
 		if task.RuntimeName() != "openshell" || task.OpenShell == nil || !task.OpenShell.Ready || (task.Status != "running" && task.Status != "starting") {
 			continue
 		}
-		requests, syncErr := s.SyncAccess(ctx, task)
-		if syncErr != nil {
-			errs = append(errs, fmt.Errorf("task %s: %w", task.ID, syncErr))
+		requests, err := s.SyncAccess(ctx, task)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("task %s: %w", task.ID, err))
+			continue
+		}
+		if len(requests) == 0 {
+			continue
+		}
+		requests, err = s.Store.claimAccessDesktop(task.ID, requests)
+		if err != nil {
+			failures = append(failures, err)
 			continue
 		}
 		if len(requests) == 0 {
 			continue
 		}
 		notifyErr := notifyAccessRequests(task, requests)
-		for _, request := range requests {
-			_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) {
-				v.NotifiedAt = now()
-				v.DesktopNotificationError = ""
-				if notifyErr != nil {
-					v.DesktopNotificationError = notifyErr.Error()
+		if err = s.Store.updateAccessState(task.ID, func(state *accessTaskState) error {
+			for _, request := range requests {
+				if r := state.Requests[request.ID]; r != nil && r.NotifiedAt == request.NotifiedAt {
+					r.DesktopNotificationError = ""
+					if notifyErr != nil {
+						r.DesktopNotificationError = "Desktop notification failed; inspect pending access on the host."
+					}
 				}
-			})
+			}
+			return nil
+		}); err != nil {
+			failures = append(failures, err)
+		}
+		if notifyErr != nil {
+			failures = append(failures, fmt.Errorf("task %s desktop access notification failed", task.ID))
 		}
 	}
-	return errors.Join(errs...)
+	return errors.Join(failures...)
 }
 
 func notifyAccessRequests(task Task, requests []AccessRequest) error {
@@ -350,78 +231,48 @@ func notifyAccessRequests(task Task, requests []AccessRequest) error {
 	script := `on run argv
 display notification (item 2 of argv) with title (item 1 of argv)
 end run`
-	cmd := exec.Command("/usr/bin/osascript", "-e", script, "--", "Paddock access request", body)
-	return cmd.Run()
+	return exec.Command("/usr/bin/osascript", "-e", script, "--", "Paddock access request", body).Run()
 }
 
+// The operator API is a wrapper over the same guarded executor. It never writes
+// a legacy record or grants from a historical display projection.
 func (s Service) DecideAccess(ctx context.Context, prefix, decision, reason string) (AccessRequest, error) {
 	request, err := s.Store.GetAccess(prefix)
 	if err != nil {
 		return request, err
 	}
-	if request.Status != "pending" {
-		return request, fmt.Errorf("access request %s is already %s", request.ID, request.Status)
-	}
 	if decision != "approve" && decision != "reject" {
-		return request, fmt.Errorf("invalid access decision %q", decision)
+		return request, fmt.Errorf("invalid access decision")
 	}
 	if decision == "reject" && strings.TrimSpace(reason) == "" {
 		return request, fmt.Errorf("a rejection reason is required")
 	}
-	task, err := s.Store.Get(request.TaskID)
+	show := s.ShowAccessV1(ctx, request.TaskID, request.ID, true)
+	if show.Error != nil {
+		return request, show.Error
+	}
+	if show.Request == nil || show.Request.Status != "pending" {
+		return request, fmt.Errorf("access request is no longer pending")
+	}
+	caller, err := LocalCaller()
 	if err != nil {
 		return request, err
 	}
-	if task.OpenShell == nil || task.OpenShell.Name != request.Sandbox {
-		return request, fmt.Errorf("access request no longer matches task sandbox")
+	input := AccessDecisionInput{ProtocolVersion: 1, TaskID: request.TaskID, Revision: show.Request.Revision, Decision: decision, ExternalID: "operator:" + newID(), Actor: AccessActor{Source: "local-operator", UserID: caller}, Reason: reason}
+	response := s.DecideAccessV1(ctx, request.ID, input)
+	if response.Receipt != nil {
+		projected, err := s.Store.GetAccess(request.ID)
+		if err != nil {
+			return request, err
+		}
+		request = projected
 	}
-	release, err := s.Store.taskLease(task.ID, "operation")
-	if err != nil {
-		return request, err
+	if response.Error != nil {
+		return request, response.Error
 	}
-	args := []string{"rule", decision, task.OpenShell.Name, "--chunk-id", request.ID}
-	if decision == "reject" {
-		args = append(args, "--reason", reason)
-	}
-	_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) {
-		v.Decision, v.DecisionReason, v.DecisionError = decision, reason, ""
-	})
-	_, callErr := task.OpenShell.Config.call(ctx, args...)
-	release()
-	if callErr != nil {
-		_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) { v.DecisionError = callErr.Error() })
-		return request, fmt.Errorf("access decision outcome is uncertain: %w; run paddock access show %s before retrying", callErr, request.ID)
-	}
-	if _, err = s.SyncAccess(ctx, task); err != nil {
-		_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) { v.DecisionError = "decision submitted; reconciliation failed: " + err.Error() })
-		return request, fmt.Errorf("OpenShell accepted the decision but Paddock could not reconcile it: %w", err)
-	}
-	request, err = s.Store.GetAccess(request.ID)
-	if err != nil {
-		return request, err
-	}
-	expected := "approved"
-	if decision == "reject" {
-		expected = "rejected"
-	}
-	if request.Status != expected {
-		return request, fmt.Errorf("OpenShell left the proposal %s after revalidation; review it again", request.Status)
-	}
-	_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) {
-		v.DecidedAt, v.DecisionError = now(), ""
-	})
-
-	message := "OpenShell network access was approved for " + request.Endpoints + " from " + request.Binary + ". Continue the requested work. Inspect current state before retrying so completed effects are not duplicated, and do not treat the earlier policy denial as evidence against the approach."
-	if decision == "reject" {
-		message = "OpenShell network access was rejected for " + request.Endpoints + ": " + reason + ". Adapt to that decision and clearly report any resulting limitation."
-	}
-	if _, messageErr := s.Message(ctx, task, message); messageErr != nil {
-		_ = s.Store.updateAccess(request.ID, func(v *AccessRequest) { v.AgentNotificationError = messageErr.Error() })
-	}
-	return s.Store.GetAccess(request.ID)
+	return request, nil
 }
 
-// Keep GC from removing the only warm checkout while an operator decision is pending.
 func (s Service) noPendingAccess(id string) error {
 	requests, err := s.Store.ListAccess(id, "pending")
 	if err != nil {

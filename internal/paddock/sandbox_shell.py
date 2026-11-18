@@ -92,10 +92,19 @@ def message(args):
     return 1
 
 
+if sys.argv[1:] in ([], ['--help'], ['-h'], ['help']):
+    print("Paddock sandbox commands:\n"
+          "  paddock attach\n"
+          "  paddock message PARENT_TASK_ID 'message' [--external-id KEY] [--json]\n"
+          "Access guide: /sandbox/.paddock/access-guide.md\n"
+          "Other Paddock commands run on the host.")
+    sys.exit(0)
+
+
 if sys.argv[1:2] == ['message']:
     sys.exit(message(sys.argv[2:]))
 if sys.argv[1:] != ['attach']:
-    sys.exit("This sandbox shortcut supports: paddock attach; paddock message PARENT_TASK_ID 'message' [--external-id KEY] [--json]\nRun other Paddock commands on the host.")
+    sys.exit("This sandbox shortcut supports: paddock attach; paddock message PARENT_TASK_ID 'message'. Run other Paddock commands on the host.")
 pending = root / 'shell-requests'
 pending.mkdir(mode=0o700, exist_ok=True)
 if len(list(pending.iterdir())) >= 4:

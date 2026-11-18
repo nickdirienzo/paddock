@@ -94,7 +94,7 @@ func parse(args []string, allowed string) (map[string]string, []string, error) {
 		if _, ok := opts[key]; ok {
 			return nil, nil, fmt.Errorf("duplicate option --%s", key)
 		}
-		if key == "json" || key == "queue" || key == "detach" || key == "dry-run" || key == "apply" {
+		if key == "json" || key == "queue" || key == "detach" || key == "dry-run" || key == "apply" || key == "refresh" {
 			if has {
 				return nil, nil, fmt.Errorf("--%s takes no value", key)
 			}
@@ -447,13 +447,14 @@ func run(args []string, out io.Writer) error {
 			return e
 		}
 		var receipt paddock.MessageReceipt
+		body := paddock.AuthoredMessageBody(t, pos[1])
 		if o["external-id"] != "" {
 			caller, e := paddock.LocalCaller()
 			if e != nil {
 				return e
 			}
 			var claimed bool
-			receipt, claimed, e = store.ClaimMessage(t.ID, caller, o["external-id"], pos[1])
+			receipt, claimed, e = store.ClaimAuthoredMessage(t.ID, caller, o["external-id"], pos[1])
 			if e != nil {
 				return e
 			}
@@ -464,8 +465,9 @@ func run(args []string, out io.Writer) error {
 				_, _ = fmt.Fprintln(out, "Message", receipt.ExternalID, "is", receipt.Status)
 				return nil
 			}
+			body = receipt.NativeBody()
 		}
-		thread, e := service.Message(ctx, t, pos[1])
+		thread, e := service.Message(ctx, t, body)
 		if o["external-id"] != "" {
 			status := "delivered"
 			message := ""

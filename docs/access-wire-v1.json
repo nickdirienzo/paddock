@@ -1,0 +1,1235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:paddock:access:wire:v1",
+  "title": "Paddock access wire v1",
+  "schema_version": 1,
+  "protocol_version": 1,
+  "description": "Network access protocol v1. Immutable snapshots disclose the complete reviewed network rule; Paddock retains private review tokens. Decisions and notifications are separately durable.",
+  "commands": {
+    "list": "paddock access list --task TASK --status all --refresh --json",
+    "show": "paddock access show REQUEST --task TASK --refresh --json",
+    "decide": "paddock access decide REQUEST --decision-file FILE --json",
+    "reconcile": "paddock access reconcile REQUEST --task TASK --json"
+  },
+  "semantics": {
+    "inspection": "Never grants, sends notification, resumes compute, or refreshes token for an admitted decision. --refresh reads authoritative backend; failures explicit.",
+    "reconcile": "Observes/reconciles existing durable decision and retries only definitely-unsent notification. Never resubmits uncertain upstream mutations. For a known request, a validated task ledger inspected under its operation lease may prove no decision intent exists: return error.code=no_decision, retryable=true, receipt=null. The caller may resubmit the exact frozen decision input/external ID. Missing/corrupt/unknown state or any existing historical/accepted intent must not return no_decision. This does not assert absence of out-of-band upstream access changes.",
+    "reject": "Pinned OpenShell 0.1.6 reject can revoke approved rules. Production adapter advertises unavailable and never calls it. current_pending_request may only be advertised by a separately qualified backend with an atomic pending-only transition.",
+    "idempotency": "Authenticated OS caller + task_id + external_id, bound to the entire input and request ID; replay returns same decision ID/current receipt.",
+    "exits": "0 on successful command/confirmed or still-pending receipt without error; nonzero with structured error. A nonzero exit does not imply no side effect; receipt remains present after admission.",
+    "notification": "Paddock exclusively owns continuation. delivered means native enqueue, not task completion.",
+    "revision": "Opaque sha256 of complete stored immutable snapshot including full rule, target identity and upstream review-token digest. Never calculate from display text.",
+    "legacy": "Operator pending/show/approve/reject syntax remains; legacy unbound show keeps old shape. --task selects wire-v1 show. Both operator and integration decisions use one executor.",
+    "backend_qualification": "The pinned adapter supports exact_reviewed_rule for qualified credential-free inspected REST AddRules using the captured upstream token and immutable sandbox ID. It does not atomically fence independently administered provider/global context or the displayed complete candidate-policy evaluation. Full evaluated-context approval still requires upstream mutation guard/CAS. Native reject remains unavailable.",
+    "advisor": "available means the effective advisor setting was observed enabled, not a live end-to-end guide/submission probe. Existing proposals may be reviewed independently of advisor setting.",
+    "examples": "Synthetic network-only examples show the qualified exact_reviewed_rule path. Other rules remain individually nonactionable; example revisions are opaque illustrative values.",
+    "network_approval": "exact_reviewed_rule applies the captured credential-free REST AddRule to the same immutable sandbox using its original review token. Independent administrator provider/global-policy changes remain independent; the complete effective policy is not frozen.",
+    "integration_results": "The integration_results feature identifies server-qualified supported_decisions, complete plain-text review text, and normalized decision outcomes. Integrations validate identity and freshness, render review unchanged, and use outcome.state for recovery instead of reinterpreting backend substates."
+  },
+  "$defs": {
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ]
+    },
+    "Actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "workspace_id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "user_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "source",
+        "workspace_id",
+        "user_id"
+      ]
+    },
+    "Target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sandbox_id": {
+          "type": "string"
+        },
+        "sandbox_name": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sandbox_id",
+        "sandbox_name",
+        "gateway",
+        "workspace"
+      ]
+    },
+    "Refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "fresh",
+            "cached",
+            "error"
+          ]
+        },
+        "checked_at": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "checked_at",
+        "error"
+      ]
+    },
+    "Advisor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable",
+            "unknown"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "error"
+      ]
+    },
+    "Snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{24}$"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "network"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/Target"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "security": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "validation_result": {
+          "type": "string"
+        },
+        "application_error": {
+          "type": "string"
+        },
+        "current_effective_policy_hash": {
+          "type": "string",
+          "description": "Evaluated baseline context hash. This is review context, not a promise to freeze independently administered effective policy through or after approval."
+        },
+        "candidate_effective_policy_hash": {
+          "type": "string",
+          "description": "Evaluated candidate context hash. This is not a guaranteed resulting full effective policy hash and must not be labeled as one."
+        },
+        "review_token_digest": {
+          "type": "string"
+        },
+        "rule_name": {
+          "type": "string",
+          "description": "Exact network-policy map key, included in the revision for new network snapshots; absent only on pre-release historical snapshots."
+        }
+      },
+      "required": [
+        "schema_version",
+        "task_id",
+        "request_id",
+        "kind",
+        "target",
+        "rule",
+        "rationale",
+        "security",
+        "validation_result",
+        "application_error",
+        "current_effective_policy_hash",
+        "candidate_effective_policy_hash",
+        "review_token_digest"
+      ]
+    },
+    "DecisionInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{24}$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "protocol_version",
+        "task_id",
+        "revision",
+        "decision",
+        "external_id",
+        "actor",
+        "reason"
+      ]
+    },
+    "DecisionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        },
+        "caller": {
+          "type": "string"
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "claimed",
+            "applying",
+            "confirmed",
+            "stale",
+            "conflict",
+            "uncertain"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "caller",
+        "actor",
+        "reason",
+        "state",
+        "created_at",
+        "updated_at",
+        "error"
+      ]
+    },
+    "Grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "withdrawn",
+            "superseded",
+            "unknown"
+          ]
+        },
+        "application_status": {
+          "type": "string",
+          "enum": [
+            "loaded",
+            "pending",
+            "error",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "policy_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policy_hash": {
+          "type": "string",
+          "description": "Returned stored sandbox policy revision hash from approval. Distinct from the evaluated candidate effective-policy hash; application status is separately observed."
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "application_status",
+        "policy_version",
+        "policy_hash",
+        "error"
+      ]
+    },
+    "Notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_requested",
+            "pending",
+            "claimed",
+            "delivered",
+            "uncertain",
+            "unavailable"
+          ]
+        },
+        "external_id": {
+          "type": "string"
+        },
+        "caller_namespace": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "external_id",
+        "caller_namespace",
+        "thread_id",
+        "retryable",
+        "error"
+      ]
+    },
+    "Receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{24}$"
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{24}$"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "external_id": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/DecisionState"
+        },
+        "grant": {
+          "$ref": "#/$defs/Grant"
+        },
+        "notification": {
+          "$ref": "#/$defs/Notification"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "id",
+        "task_id",
+        "request_id",
+        "revision",
+        "external_id",
+        "decision",
+        "grant",
+        "notification"
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{24}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "network"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/Target"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64})?$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "withdrawn",
+            "superseded",
+            "unknown"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "sandbox"
+          ]
+        },
+        "grant_expires_at": {
+          "type": "null"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supported_decisions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          }
+        },
+        "decision_semantics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "approve": {
+              "type": "string",
+              "enum": [
+                "exact_revision",
+                "unavailable",
+                "exact_reviewed_rule"
+              ]
+            },
+            "reject": {
+              "type": "string",
+              "enum": [
+                "current_pending_request",
+                "exact_revision",
+                "unavailable"
+              ]
+            }
+          },
+          "required": [
+            "approve",
+            "reject"
+          ]
+        },
+        "actionable": {
+          "type": "boolean"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Receipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review": {
+          "$ref": "#/$defs/Review"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "kind",
+        "target",
+        "revision",
+        "status",
+        "scope",
+        "grant_expires_at",
+        "snapshot",
+        "supported_decisions",
+        "decision_semantics",
+        "actionable",
+        "receipt",
+        "error",
+        "review",
+        "outcome"
+      ]
+    },
+    "List": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "type": "string",
+          "description": "Full task ID on success; may contain invalid supplied value on an error response."
+        },
+        "refresh": {
+          "$ref": "#/$defs/Refresh"
+        },
+        "advisor": {
+          "$ref": "#/$defs/Advisor"
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Request"
+          }
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "features",
+        "task_id",
+        "refresh",
+        "advisor",
+        "requests",
+        "error"
+      ]
+    },
+    "Show": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "type": "string",
+          "description": "Full task ID on success; may contain invalid supplied value on an error response."
+        },
+        "refresh": {
+          "$ref": "#/$defs/Refresh"
+        },
+        "advisor": {
+          "$ref": "#/$defs/Advisor"
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Request"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "features",
+        "task_id",
+        "refresh",
+        "advisor",
+        "request",
+        "error"
+      ]
+    },
+    "DecisionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Receipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "task_id",
+        "request_id",
+        "receipt",
+        "error",
+        "outcome"
+      ]
+    },
+    "Review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "details"
+      ]
+    },
+    "Outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "unresolved",
+            "settled",
+            "review_ended",
+            "not_submitted"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "summary"
+      ]
+    }
+  },
+  "exported_examples": {
+    "list": {
+      "protocol_version": 1,
+      "features": [
+        "task_bound_requests",
+        "immutable_revision",
+        "decision_idempotency",
+        "single_winner",
+        "network_review_token",
+        "notification_receipts",
+        "integration_results"
+      ],
+      "task_id": "0123456789abcdef01234567",
+      "refresh": {
+        "state": "fresh",
+        "checked_at": "2026-11-17T20:00:00Z",
+        "error": null
+      },
+      "advisor": {
+        "state": "available",
+        "error": null
+      },
+      "requests": [
+        {
+          "id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+          "task_id": "0123456789abcdef01234567",
+          "kind": "network",
+          "target": {
+            "sandbox_id": "01abcdef-1234-4321-abcd-0123456789ab",
+            "sandbox_name": "pd-example",
+            "gateway": "example-gateway",
+            "workspace": "default"
+          },
+          "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "pending",
+          "scope": "sandbox",
+          "grant_expires_at": null,
+          "snapshot": {
+            "schema_version": 1,
+            "task_id": "0123456789abcdef01234567",
+            "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+            "kind": "network",
+            "target": {
+              "sandbox_id": "01abcdef-1234-4321-abcd-0123456789ab",
+              "sandbox_name": "pd-example",
+              "gateway": "example-gateway",
+              "workspace": "default"
+            },
+            "rule": {
+              "name": "npm_registry",
+              "endpoints": [
+                {
+                  "host": "registry.npmjs.org",
+                  "port": 443,
+                  "protocol": "rest",
+                  "enforcement": 1,
+                  "access": 1
+                }
+              ],
+              "binaries": [
+                {
+                  "path": "/usr/local/bin/node"
+                }
+              ]
+            },
+            "rationale": "Download the requested npm dependencies.",
+            "security": [],
+            "validation_result": "no new findings",
+            "application_error": "",
+            "current_effective_policy_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "candidate_effective_policy_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "review_token_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "rule_name": "npm_registry"
+          },
+          "supported_decisions": [
+            "approve"
+          ],
+          "decision_semantics": {
+            "approve": "exact_reviewed_rule",
+            "reject": "unavailable"
+          },
+          "actionable": true,
+          "receipt": null,
+          "error": null,
+          "review": {
+            "summary": "Network access requested",
+            "details": [
+              "Task: 0123456789abcdef01234567",
+              "Sandbox: pd-example (01abcdef-1234-4321-abcd-0123456789ab)",
+              "Gateway: example-gateway; workspace: default",
+              "Purpose: Download the requested npm dependencies.",
+              "Rule name: npm_registry",
+              "Scope: this sandbox. This rule may permit later matching requests; it is not a single download.",
+              "Requested access:\n{\n  \"name\": \"npm_registry\",\n  \"endpoints\": [\n    {\n      \"host\": \"registry.npmjs.org\",\n      \"port\": 443,\n      \"protocol\": \"rest\",\n      \"enforcement\": 1,\n      \"access\": 1\n    }\n  ],\n  \"binaries\": [\n    {\n      \"path\": \"/usr/local/bin/node\"\n    }\n  ]\n}",
+              "Validation: no new findings",
+              "Evaluated candidate policy: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            ]
+          },
+          "outcome": {
+            "state": "unresolved",
+            "summary": "Request: pending"
+          }
+        }
+      ],
+      "error": null
+    },
+    "empty_list": {
+      "protocol_version": 1,
+      "features": [
+        "task_bound_requests",
+        "immutable_revision",
+        "decision_idempotency",
+        "single_winner",
+        "network_review_token",
+        "notification_receipts",
+        "integration_results"
+      ],
+      "task_id": "0123456789abcdef01234567",
+      "refresh": {
+        "state": "fresh",
+        "checked_at": "2026-11-17T20:00:00Z",
+        "error": null
+      },
+      "advisor": {
+        "state": "available",
+        "error": null
+      },
+      "requests": [],
+      "error": null
+    },
+    "show": {
+      "protocol_version": 1,
+      "features": [
+        "task_bound_requests",
+        "immutable_revision",
+        "decision_idempotency",
+        "single_winner",
+        "network_review_token",
+        "notification_receipts",
+        "integration_results"
+      ],
+      "task_id": "0123456789abcdef01234567",
+      "refresh": {
+        "state": "fresh",
+        "checked_at": "2026-11-17T20:00:00Z",
+        "error": null
+      },
+      "advisor": {
+        "state": "available",
+        "error": null
+      },
+      "request": {
+        "id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+        "task_id": "0123456789abcdef01234567",
+        "kind": "network",
+        "target": {
+          "sandbox_id": "01abcdef-1234-4321-abcd-0123456789ab",
+          "sandbox_name": "pd-example",
+          "gateway": "example-gateway",
+          "workspace": "default"
+        },
+        "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status": "pending",
+        "scope": "sandbox",
+        "grant_expires_at": null,
+        "snapshot": {
+          "schema_version": 1,
+          "task_id": "0123456789abcdef01234567",
+          "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+          "kind": "network",
+          "target": {
+            "sandbox_id": "01abcdef-1234-4321-abcd-0123456789ab",
+            "sandbox_name": "pd-example",
+            "gateway": "example-gateway",
+            "workspace": "default"
+          },
+          "rule": {
+            "name": "npm_registry",
+            "endpoints": [
+              {
+                "host": "registry.npmjs.org",
+                "port": 443,
+                "protocol": "rest",
+                "enforcement": 1,
+                "access": 1
+              }
+            ],
+            "binaries": [
+              {
+                "path": "/usr/local/bin/node"
+              }
+            ]
+          },
+          "rationale": "Download the requested npm dependencies.",
+          "security": [],
+          "validation_result": "no new findings",
+          "application_error": "",
+          "current_effective_policy_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "candidate_effective_policy_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "review_token_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "rule_name": "npm_registry"
+        },
+        "supported_decisions": [
+          "approve"
+        ],
+        "decision_semantics": {
+          "approve": "exact_reviewed_rule",
+          "reject": "unavailable"
+        },
+        "actionable": true,
+        "receipt": null,
+        "error": null,
+        "review": {
+          "summary": "Network access requested",
+          "details": [
+            "Task: 0123456789abcdef01234567",
+            "Sandbox: pd-example (01abcdef-1234-4321-abcd-0123456789ab)",
+            "Gateway: example-gateway; workspace: default",
+            "Purpose: Download the requested npm dependencies.",
+            "Rule name: npm_registry",
+            "Scope: this sandbox. This rule may permit later matching requests; it is not a single download.",
+            "Requested access:\n{\n  \"name\": \"npm_registry\",\n  \"endpoints\": [\n    {\n      \"host\": \"registry.npmjs.org\",\n      \"port\": 443,\n      \"protocol\": \"rest\",\n      \"enforcement\": 1,\n      \"access\": 1\n    }\n  ],\n  \"binaries\": [\n    {\n      \"path\": \"/usr/local/bin/node\"\n    }\n  ]\n}",
+            "Validation: no new findings",
+            "Evaluated candidate policy: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          ]
+        },
+        "outcome": {
+          "state": "unresolved",
+          "summary": "Request: pending"
+        }
+      },
+      "error": null
+    },
+    "decision_input": {
+      "protocol_version": 1,
+      "task_id": "0123456789abcdef01234567",
+      "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decision": "approve",
+      "external_id": "arnold:access:action-123",
+      "actor": {
+        "source": "arnold-slack",
+        "workspace_id": "T0123456789",
+        "user_id": "U0123456789"
+      },
+      "reason": "Required dependency download"
+    },
+    "receipt": {
+      "protocol_version": 1,
+      "id": "a12345678901234567890123",
+      "task_id": "0123456789abcdef01234567",
+      "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+      "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "external_id": "arnold:access:action-123",
+      "decision": {
+        "value": "approve",
+        "caller": "501:arnold-service",
+        "actor": {
+          "source": "arnold-slack",
+          "workspace_id": "T0123456789",
+          "user_id": "U0123456789"
+        },
+        "reason": "Required dependency download",
+        "state": "confirmed",
+        "created_at": "2026-11-17T20:00:00Z",
+        "updated_at": "2026-11-17T20:00:00Z",
+        "error": null
+      },
+      "grant": {
+        "status": "approved",
+        "application_status": "unknown",
+        "policy_version": 12,
+        "policy_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "error": null
+      },
+      "notification": {
+        "status": "pending",
+        "external_id": "access:a12345678901234567890123",
+        "caller_namespace": "paddock:access-notification",
+        "thread_id": "",
+        "retryable": true,
+        "error": {
+          "code": "agent_offline",
+          "message": "Native idle release is being reconciled.",
+          "retryable": true
+        }
+      }
+    },
+    "decision_response": {
+      "protocol_version": 1,
+      "task_id": "0123456789abcdef01234567",
+      "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+      "receipt": {
+        "protocol_version": 1,
+        "id": "a12345678901234567890123",
+        "task_id": "0123456789abcdef01234567",
+        "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+        "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_id": "arnold:access:action-123",
+        "decision": {
+          "value": "approve",
+          "caller": "501:arnold-service",
+          "actor": {
+            "source": "arnold-slack",
+            "workspace_id": "T0123456789",
+            "user_id": "U0123456789"
+          },
+          "reason": "Required dependency download",
+          "state": "confirmed",
+          "created_at": "2026-11-17T20:00:00Z",
+          "updated_at": "2026-11-17T20:00:00Z",
+          "error": null
+        },
+        "grant": {
+          "status": "approved",
+          "application_status": "unknown",
+          "policy_version": 12,
+          "policy_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "error": null
+        },
+        "notification": {
+          "status": "pending",
+          "external_id": "access:a12345678901234567890123",
+          "caller_namespace": "paddock:access-notification",
+          "thread_id": "",
+          "retryable": true,
+          "error": {
+            "code": "agent_offline",
+            "message": "Native idle release is being reconciled.",
+            "retryable": true
+          }
+        }
+      },
+      "error": null,
+      "outcome": {
+        "state": "unresolved",
+        "summary": "Decision: approve (confirmed); Access: approved; Policy: unknown; Agent notification: pending; Native idle release is being reconciled."
+      }
+    },
+    "uncertain_response": {
+      "protocol_version": 1,
+      "task_id": "0123456789abcdef01234567",
+      "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+      "receipt": {
+        "protocol_version": 1,
+        "id": "a12345678901234567890123",
+        "task_id": "0123456789abcdef01234567",
+        "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+        "revision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_id": "arnold:access:action-123",
+        "decision": {
+          "value": "approve",
+          "caller": "501:arnold-service",
+          "actor": {
+            "source": "arnold-slack",
+            "workspace_id": "T0123456789",
+            "user_id": "U0123456789"
+          },
+          "reason": "Required dependency download",
+          "state": "uncertain",
+          "created_at": "2026-11-17T20:00:00Z",
+          "updated_at": "2026-11-17T20:00:00Z",
+          "error": {
+            "code": "outcome_uncertain",
+            "message": "Inspect upstream state before any retry.",
+            "retryable": false
+          }
+        },
+        "grant": {
+          "status": "unknown",
+          "application_status": "unknown",
+          "policy_version": 0,
+          "policy_hash": "",
+          "error": {
+            "code": "outcome_uncertain",
+            "message": "Inspect upstream state before any retry.",
+            "retryable": false
+          }
+        },
+        "notification": {
+          "status": "not_requested",
+          "external_id": "",
+          "caller_namespace": "",
+          "thread_id": "",
+          "retryable": false,
+          "error": null
+        }
+      },
+      "error": {
+        "code": "outcome_uncertain",
+        "message": "Inspect upstream state before any retry.",
+        "retryable": false
+      },
+      "outcome": {
+        "state": "unresolved",
+        "summary": "Decision: approve (uncertain); Access: unknown; Policy: unknown; Agent notification: not_requested; Inspect upstream state before any retry.; Inspect upstream state before any retry.; Inspect upstream state before any retry."
+      }
+    },
+    "no_decision_response": {
+      "protocol_version": 1,
+      "task_id": "0123456789abcdef01234567",
+      "request_id": "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89",
+      "receipt": null,
+      "error": {
+        "code": "no_decision",
+        "message": "No Paddock decision intent exists; resubmit the exact frozen decision input and external ID.",
+        "retryable": true
+      },
+      "outcome": {
+        "state": "not_submitted",
+        "summary": "No Paddock decision intent exists; resubmit the exact frozen decision input and external ID."
+      }
+    }
+  }
+}

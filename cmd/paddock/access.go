@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/nickdirienzo/paddock/internal/paddock"
@@ -15,6 +16,10 @@ const accessHelp = `paddock access pending [task] [--json]
 paddock access show REQUEST [--json]
 paddock access approve REQUEST [--json]
 paddock access reject REQUEST --reason TEXT [--json]
+paddock access list --task TASK [--status all|pending] [--refresh] --json
+paddock access show REQUEST --task TASK [--refresh] --json
+paddock access decide REQUEST --decision-file FILE --json
+paddock access reconcile REQUEST --task TASK --json
 
 Access requests mirror OpenShell network-rule proposals. Approval applies the
 exact reviewed proposal to that task's sandbox and then notifies its agent.
@@ -66,6 +71,9 @@ func runAccess(args []string, out io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	if command == "list" || command == "decide" || command == "reconcile" || (command == "show" && hasAccessTaskFlag(args[1:])) {
+		return runAccessV1(args, out)
+	}
 	allowed := map[string]string{"pending": "json", "show": "json", "approve": "json", "reject": "reason json"}
 	flags, ok := allowed[command]
 	if !ok {
@@ -164,7 +172,16 @@ func runAccess(args []string, out io.Writer) error {
 	}
 	printAccess(out, request)
 	if request.AgentNotificationError != "" {
-		fmt.Fprintf(out, "Access was %s, but automatic agent notification failed. Use paddock message %s to continue it.\n", request.Status, request.TaskID)
+		fmt.Fprintf(out, "Access was %s; inspect its durable notification with paddock access reconcile %s --task %s --json.\n", request.Status, request.ID, request.TaskID)
 	}
 	return nil
+}
+
+func hasAccessTaskFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--task" || strings.HasPrefix(arg, "--task=") || arg == "--refresh" {
+			return true
+		}
+	}
+	return false
 }
