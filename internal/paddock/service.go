@@ -17,6 +17,8 @@ type Service struct {
 	// Tests can supply deterministic native-delivery behavior for routing fixtures.
 	// Production services leave this nil and use native Message delivery.
 	messageDelivery func(context.Context, Task, string) (string, error)
+	// Private test seam; production always uses the pinned structured adapter.
+	accessBackend OpenShellAccessBackend
 }
 
 func (s Service) sendMessage(ctx context.Context, task Task, body string) (string, error) {

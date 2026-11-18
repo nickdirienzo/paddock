@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 12 // v12 relays sandbox messages to their registered parent.
+const githubPollerVersion = 13 // v13 upgrades the access guide and recovers notification outboxes.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.
@@ -292,6 +292,9 @@ func (g GitHubCoordinator) RunGitHubPoller(ctx context.Context, interval time.Du
 		lastError := ""
 		for {
 			err := g.Service.SyncRunningAccess(ctx)
+			if outboxErr := g.Service.ReconcileAccessOutboxes(ctx); outboxErr != nil && err == nil {
+				err = outboxErr
+			}
 			message := ""
 			if err != nil {
 				message = err.Error()

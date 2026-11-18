@@ -111,6 +111,15 @@ claim an App actor. Follow-ups and resume use the task's saved runtime and confi
 The CLI contains no application-specific requester interpretation. Integrations
 must authenticate their own users and authorize requests before invoking it.
 
+Task-bound access requests have a separate [versioned access contract](access.md)
+and [JSON schema/examples](access-wire-v1.json). Use `access list/show` for
+inspection, `access decide --decision-file` for idempotent admission, and
+`access reconcile` for observation and safe notification recovery. Per-request
+supported actions are authoritative. The stock OpenShell 0.1.6 adapter supports
+the exact reviewed credential-free REST rule; it does not freeze independent
+provider/global administrator changes. Unsafe network rejection remains
+unavailable. Only network proposals are included; no host-operation executor or credential broker is provisioned.
+
 ## Per-task idle TTL contract
 
 An integration opts in at dispatch with `run --idle-ttl 24h`; omit the option

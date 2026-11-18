@@ -33,9 +33,6 @@ func OpenStore(home string) (*Store, error) {
 	if err = os.MkdirAll(filepath.Join(home, "tasks"), 0700); err != nil {
 		return nil, err
 	}
-	if err = os.MkdirAll(filepath.Join(home, "access"), 0700); err != nil {
-		return nil, err
-	}
 	if err = os.MkdirAll(filepath.Join(home, "messages"), 0700); err != nil {
 		return nil, err
 	}

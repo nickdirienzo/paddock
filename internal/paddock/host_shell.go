@@ -135,7 +135,13 @@ for f in files:
 
 func installHostShellShortcut(ctx context.Context, t Task) error {
 	_, err := sandboxOutput(ctx, t, "python3", "-c", installSandboxShell, sandboxShellClient)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := installAccessGuide(ctx, t); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s Service) EnableHostShell(ctx context.Context, t Task) error {

@@ -14,9 +14,16 @@ import (
 // ErrAgentOffline means delivery was not attempted and is safe to retry later.
 var ErrAgentOffline = errors.New("agent is offline")
 
+// A pinned outbox must never follow replacement sandbox/conversation identity.
+var ErrMessageTargetChanged = errors.New("message target changed")
+
 // Message uses the agent's native queue, never keyboard input into a terminal
 // that might currently be displaying an approval dialog.
 func (s Service) Message(ctx context.Context, task Task, body string) (string, error) {
+	return s.messageExpected(ctx, task, body, nil)
+}
+
+func (s Service) messageExpected(ctx context.Context, task Task, body string, expected *Task) (string, error) {
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("message cannot be empty")
 	}
@@ -31,6 +38,21 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	task, err = s.Store.Get(task.ID)
 	if err != nil {
 		return "", err
+	}
+	if expected != nil && (accessTargetFor(task) != accessTargetFor(*expected) || task.Session.ConversationID != expected.Session.ConversationID || task.WorkspaceRemovedAt != "" || (task.Archive != nil && task.Archive.Phase != "" && task.Archive.Phase != "revived")) {
+		return "", ErrMessageTargetChanged
+	}
+	if expected != nil {
+		// Check while holding the actual messaging operation lease: an access
+		// inspection may have learned of remote replacement after the outbox's
+		// earlier registry read. No cached .Ready state can override that proof.
+		state, err := s.Store.accessState(task.ID)
+		if err != nil {
+			return "", fmt.Errorf("%w: pinned target ledger is unavailable", ErrAgentOffline)
+		}
+		if accessTargetFailure(state, task) != nil {
+			return "", ErrMessageTargetChanged
+		}
 	}
 	if task.Idle != nil && (task.Idle.Phase == "releasing" || task.Idle.Phase == "draining") {
 		return "", fmt.Errorf("%w: native idle release is being reconciled; retry after task stops", ErrAgentOffline)

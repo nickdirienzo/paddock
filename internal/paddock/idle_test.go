@@ -592,9 +592,10 @@ func TestIdlePendingAccessDoesNotRetainCompletedProcess(t *testing.T) {
 				}
 				addProposal := func() {
 					t.Helper()
-					_, _, err := s.Store.upsertAccess(task, AccessRequest{
-						ID: "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89", TaskID: task.ID, Sandbox: task.OpenShell.Name,
-						Status: "pending", Endpoints: "telemetry.example:443 [L4]",
+					err := s.Store.updateAccessState(task.ID, func(state *accessTaskState) error {
+						id := "4cf929e5-cd07-43c4-a6e4-b0b7efb9ec89"
+						state.Requests[id] = &accessStoredRequest{View: AccessView{ID: id, TaskID: task.ID, Kind: "network", Status: "pending", Scope: "sandbox", Target: accessTargetFor(task)}, Snapshots: map[string]accessStoredSnapshot{}}
+						return nil
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -644,7 +645,7 @@ func TestIdlePendingAccessDoesNotRetainCompletedProcess(t *testing.T) {
 				if err != nil || len(pending) != 1 || pending[0].Decision != "" {
 					t.Fatal("expiry changed the access inbox", pending, err)
 				}
-				if err := s.noPendingWork(task.ID); err == nil || !strings.Contains(err.Error(), "pending OpenShell access request") {
+				if err := s.noPendingWork(task.ID); err == nil || !strings.Contains(err.Error(), "pending or unknown access request") {
 					t.Fatal("pending proposal no longer protects workspace GC", err)
 				}
 			})

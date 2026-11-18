@@ -306,6 +306,9 @@ func (s Service) noPendingMessages(ctx context.Context, task Task) error {
 			return err
 		}
 		if (receipt.TaskID == task.ID || receipt.Caller == "sandbox:"+task.ID) && receipt.Status != "delivered" {
+			if s.accessMessageDisposed(receipt) {
+				continue
+			}
 			return fmt.Errorf("pending or uncertain message delivery")
 		}
 	}
