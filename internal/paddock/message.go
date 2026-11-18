@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -127,8 +128,18 @@ func agentControlEnv(task Task) []string {
 	}
 	if task.Session.AgentHome != "" {
 		key := "CODEX_HOME"
+		value := task.Session.AgentHome
 		if task.Session.Agent == "claude" {
 			key = "CLAUDE_CONFIG_DIR"
+			if task.Session.ClaudeConfigDir != nil {
+				value = *task.Session.ClaudeConfigDir
+			} else if task.RuntimeName() == "host" {
+				// Older records only saved the state directory. Repair the
+				// default-home case on resume while retaining custom homes.
+				if home, err := os.UserHomeDir(); err == nil && value == filepath.Join(home, ".claude") {
+					value = ""
+				}
+			}
 		}
 		filtered := make([]string, 0, len(env)+1)
 		for _, v := range env {
@@ -136,7 +147,10 @@ func agentControlEnv(task Task) []string {
 				filtered = append(filtered, v)
 			}
 		}
-		env = append(filtered, key+"="+task.Session.AgentHome)
+		env = filtered
+		if value != "" {
+			env = append(env, key+"="+value)
+		}
 	}
 	return env
 }

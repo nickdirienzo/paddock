@@ -105,6 +105,9 @@ type Session struct {
 	ExitCode        *int       `json:"exit_code,omitempty"`
 	StartedAt       string     `json:"started_at,omitempty"`
 	EndedAt         string     `json:"ended_at,omitempty"`
+
+	// Empty means Claude's default config lookup; nil identifies older task records.
+	ClaudeConfigDir *string `json:"claude_config_dir,omitempty"`
 }
 
 type Observation struct {

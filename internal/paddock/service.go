@@ -239,6 +239,16 @@ func (s Service) runHost(ctx context.Context, o RunOptions, repo Repository) (Ta
 			return empty, err
 		}
 	}
+	if o.Agent == "claude" {
+		// Claude's default state directory is ~/.claude, but exporting that
+		// directory changes user config lookup from ~/.claude.json to
+		// ~/.claude/.claude.json. Preserve whether the caller opted in.
+		configDir := ""
+		if os.Getenv("CLAUDE_CONFIG_DIR") != "" {
+			configDir = session.AgentHome
+		}
+		session.ClaudeConfigDir = &configDir
+	}
 	session.TrustProject = trusted && o.Agent == "codex"
 	session.AgentPath = agentPath
 	session.Name = "paddock-" + id

@@ -32,6 +32,13 @@ Ensure `~/.local/bin` is on your PATH. Go is only needed to build; the resulting
 executable has no language runtime or database dependency. Keep the executable
 at a stable path while tasks are running because host task supervisors use it.
 
+Host Claude tasks use the same user MCP configuration as an ordinary `claude`
+invocation: `~/.claude.json` by default. If you explicitly set
+`CLAUDE_CONFIG_DIR` when creating a task, Paddock preserves that directory on
+resume, including Claude's user config at `$CLAUDE_CONFIG_DIR/.claude.json`.
+After upgrading Paddock, exit and resume an affected host Claude task to restore
+default config lookup. Existing tasks with custom config directories retain them.
+
 ```sh
 cd /path/to/any/git/repository
 paddock run "Implement feature X" --agent codex
