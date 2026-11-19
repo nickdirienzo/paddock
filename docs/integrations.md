@@ -64,6 +64,23 @@ retried with the same ID. A crash or ambiguous delivery is `claimed` or
 `uncertain` and is never replayed automatically; inspect the agent session
 before sending a new message.
 
+Both `run` (including `delegate`) and `message` accept `--images-file images.json`,
+a JSON array of local image paths, up to eight PNG, JPEG, GIF or WebP files totaling
+20 MiB. Paddock snapshots regular files, rejects symlinks, and uploads the bytes
+into private files under `/home/sandbox/.paddock/attachments` before native input
+delivery. The prompt names those files and asks the agent to inspect them using
+its image-reading tool. This requires OpenShell and works with either coding
+agent; integration credentials are never sent to the sandbox.
+
+Content hashes in the supplied paths make existing dispatch/message idempotency
+include the images: changing the selected bytes with the same external ID is
+rejected. Initial task images are retained privately under the registry's
+`input-images/TASK_ID` directory for launch recovery. For pending follow-up
+delivery, integrations must retain the same bytes and supply them again on retry.
+Image upload failures happen before native queueing and are safe to retry. Restart
+the shared poller after installing an updated Paddock binary so task updates
+preserve the new image metadata; no runtime-image rebuild is required.
+
 `output --json` reads the pinned OpenShell conversation without resuming it. It
 returns public assistant messages and a `turn_finished` event when native history
 records a terminal turn state. Codex reports `completed`, `failed`, or

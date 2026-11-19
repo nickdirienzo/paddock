@@ -34,6 +34,7 @@ type RunOptions struct {
 	Identity, Launcher, Requester, RequesterSource, ExternalID string
 	IdleTTL                                                    string
 	CodexTUI                                                   string
+	Images                                                     []InputImage
 	Context                                                    map[string]string
 	provenance                                                 TaskProvenance
 	launcher                                                   LauncherConfig
@@ -49,6 +50,7 @@ func ValidateStateHome(home, repo string) error {
 func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	var empty Task
 	var err error
+	o.Prompt = ImageMessageBody(o.Prompt, o.Images)
 	if err = validateCodexTUI(o.CodexTUI); err != nil {
 		return empty, err
 	}
@@ -183,6 +185,9 @@ func (s Service) Run(ctx context.Context, o RunOptions) (Task, error) {
 	if o.Role != "" && (o.Role != "tp" || o.Runtime != "host") {
 		return empty, fmt.Errorf("Team Principal requires the host runtime")
 	}
+	if len(o.Images) > 0 && o.Runtime != "openshell" {
+		return empty, fmt.Errorf("image inputs require the OpenShell runtime")
+	}
 	if o.Runtime == "host" && o.IdleTTL != "" {
 		return empty, fmt.Errorf("idle-ttl requires the OpenShell runtime")
 	}
@@ -297,6 +302,9 @@ func (s Service) launchTask(ctx context.Context, t Task) (Task, error) {
 		}
 		current, _ := s.Store.Get(t.ID)
 		return current, fmt.Errorf("task %s: %w", t.ID, cause)
+	}
+	if err = s.stageTaskImages(ctx, t); err != nil {
+		return fail(err)
 	}
 	if err = s.prepareRexGroup(ctx, &t); err != nil {
 		return fail(err)

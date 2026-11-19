@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const githubPollerVersion = 14 // v14 uses named-profile mTLS independently of gateway bootstrap TLS.
+const githubPollerVersion = 15 // v15 preserves image inputs when updating task records.
 
 // GitHubPollerStatus describes the shared process, not an individual task.
 // Running is checked against its OS lock; a stale PID never implies liveness.

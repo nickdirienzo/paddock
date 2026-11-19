@@ -24,7 +24,15 @@ func (s Service) Message(ctx context.Context, task Task, body string) (string, e
 	return s.messageExpected(ctx, task, body, nil)
 }
 
+func (s Service) MessageWithImages(ctx context.Context, task Task, body string, images []InputImage) (string, error) {
+	return s.messageImagesExpected(ctx, task, body, nil, images)
+}
+
 func (s Service) messageExpected(ctx context.Context, task Task, body string, expected *Task) (string, error) {
+	return s.messageImagesExpected(ctx, task, body, expected, nil)
+}
+
+func (s Service) messageImagesExpected(ctx context.Context, task Task, body string, expected *Task, images []InputImage) (string, error) {
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("message cannot be empty")
 	}
@@ -77,6 +85,9 @@ func (s Service) messageExpected(ctx context.Context, task Task, body string, ex
 		if task.Status != "running" || observation.State != "running" {
 			return "", fmt.Errorf("%w: agent has not started yet", ErrAgentOffline)
 		}
+	}
+	if err := stageInputImages(ctx, task, images); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrAgentOffline, err)
 	}
 	if task.Session.Agent == "claude" {
 		return s.messageClaude(ctx, task, body)

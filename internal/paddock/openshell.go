@@ -302,9 +302,12 @@ func (s Service) runOpenShell(ctx context.Context, o RunOptions, repo Repository
 	} else {
 		remote = ""
 	}
-	t = Task{ID: id, Launcher: &o.launcher, IdleTTL: o.IdleTTL, Runtime: "openshell", Provenance: o.provenance, OpenShell: &OpenShellTask{Config: c, Name: name, Provider: provider, Repository: remote, Identity: binding, GitAuthorEmail: mail, GitAuthorName: author}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), LastWorkAt: now(), Session: session}
+	t = Task{InputImages: o.Images, ID: id, Launcher: &o.launcher, IdleTTL: o.IdleTTL, Runtime: "openshell", Provenance: o.provenance, OpenShell: &OpenShellTask{Config: c, Name: name, Provider: provider, Repository: remote, Identity: binding, GitAuthorEmail: mail, GitAuthorName: author}, ParentID: o.Parent, SignalID: o.SignalID, RelatedTaskID: o.RelatedTaskID, Prompt: o.Prompt, Repo: repo.Root, CommonDir: repo.CommonDir, Base: repo.Base, BaseCommit: repo.Commit, Branch: "paddock/" + id, Worktree: "/sandbox/worktree", Status: "preparing", CreatedAt: now(), UpdatedAt: now(), LastActivityAt: now(), LastWorkAt: now(), Session: session}
 	t.OpenShell.AgentProxy, e = sandboxAgentProxy(s.Store.Home, c.Binary, o.Agent)
 	if e != nil {
+		return t, e
+	}
+	if e = s.saveTaskImages(t); e != nil {
 		return t, e
 	}
 	if e = s.Store.Insert(t); e != nil {

@@ -29,6 +29,7 @@ type TaskPullRequest struct {
 }
 
 type Task struct {
+	InputImages        []InputImage      `json:"input_images,omitempty"`
 	PullRequests       []TaskPullRequest `json:"pull_requests,omitempty"`
 	LastWorkAt         string            `json:"last_work_at,omitempty"`
 	ShipmentSource     string            `json:"shipment_source,omitempty"`

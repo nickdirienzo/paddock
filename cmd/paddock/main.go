@@ -21,12 +21,12 @@ const help = `Paddock — a local control plane for coding agents
   paddock launcher list|show|configure
   paddock new [--repo name-or-path] [--agent codex|claude]
   paddock rex setup|remove [--config path] [--key shortcut]
-  paddock run [<prompt>|-] [--prompt-file path] [--agent codex|claude] [--terminal auto|rex|screen]
+  paddock run [<prompt>|-] [--prompt-file path] [--images-file JSON] [--agent codex|claude] [--terminal auto|rex|screen]
                            [--identity name] [--launcher name] [--codex-tui default|scrollback|fullscreen]
                            [--requester id] [--requester-source service] [--external-id id] [--context-file JSON]
                            [--idle-ttl duration] [--runtime openshell|host] [--repo path] [--base ref] [--json] [--detach] [--client Rex-client-id]
   paddock delegate [<prompt>|-] [--prompt-file path] [--parent id] [run options]
-  paddock message <id> "message" [--external-id id] [--json]
+  paddock message <id> "message" [--images-file JSON] [--external-id id] [--json]
   paddock tasks [--json]
   paddock show <id> [--json]
   paddock output <id> [--after cursor] [--limit 1..100] [--json]
@@ -283,7 +283,7 @@ func run(args []string, out io.Writer) error {
 	if command == "shell-setup" {
 		return runShellSetup(args[1:], out)
 	}
-	allowed := map[string]string{"run": "prompt-file idle-ttl agent terminal repo base runtime identity launcher codex-tui requester requester-source external-id context-file json detach client", "delegate": "prompt-file idle-ttl agent terminal repo base runtime parent identity launcher codex-tui requester requester-source external-id context-file json", "resume": "json detach client codex-tui", "revive": "json detach client", "message": "external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
+	allowed := map[string]string{"run": "images-file prompt-file idle-ttl agent terminal repo base runtime identity launcher codex-tui requester requester-source external-id context-file json detach client", "delegate": "images-file prompt-file idle-ttl agent terminal repo base runtime parent identity launcher codex-tui requester requester-source external-id context-file json", "resume": "json detach client codex-tui", "revive": "json detach client", "message": "images-file external-id json", "tasks": "json", "show": "json", "output": "after limit json", "artifacts": "json", "attach": "client", "__run": "generation", "__paste": "generation resume-notice"}
 	flags, ok := allowed[command]
 	if !ok {
 		return fmt.Errorf("unknown command %q; use paddock --help", command)
@@ -436,7 +436,11 @@ func run(args []string, out io.Writer) error {
 				return fmt.Errorf("delegate requires --parent <id> or PADDOCK_TASK_ID from a running task")
 			}
 		}
-		t, err := service.Run(ctx, paddock.RunOptions{Prompt: prompt, IdleTTL: o["idle-ttl"], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Launcher: o["launcher"], CodexTUI: o["codex-tui"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
+		images, err := paddock.LoadInputImages(o["images-file"])
+		if err != nil {
+			return err
+		}
+		t, err := service.Run(ctx, paddock.RunOptions{Images: images, Prompt: prompt, IdleTTL: o["idle-ttl"], Parent: parent, Agent: o["agent"], Backend: o["terminal"], Repo: o["repo"], Base: o["base"], Runtime: o["runtime"], Identity: o["identity"], Launcher: o["launcher"], CodexTUI: o["codex-tui"], Requester: o["requester"], RequesterSource: o["requester-source"], ExternalID: o["external-id"], Context: contextFields})
 		if err != nil {
 			return err
 		}
@@ -446,6 +450,11 @@ func run(args []string, out io.Writer) error {
 		if e != nil {
 			return e
 		}
+		images, e := paddock.LoadInputImages(o["images-file"])
+		if e != nil {
+			return e
+		}
+		pos[1] = paddock.ImageMessageBody(pos[1], images)
 		var receipt paddock.MessageReceipt
 		body := paddock.AuthoredMessageBody(t, pos[1])
 		if o["external-id"] != "" {
@@ -467,7 +476,7 @@ func run(args []string, out io.Writer) error {
 			}
 			body = receipt.NativeBody()
 		}
-		thread, e := service.Message(ctx, t, body)
+		thread, e := service.MessageWithImages(ctx, t, body, images)
 		if o["external-id"] != "" {
 			status := "delivered"
 			message := ""
